@@ -3,7 +3,7 @@ FROM ubuntu:18.04
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install dependencies for building OpenCV 3.2
+# Install dependencies for building OpenCV 3.4
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
