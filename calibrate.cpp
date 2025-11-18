@@ -4,6 +4,10 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <stdio.h>
 #include <iostream>
+#include <dirent.h>
+#include <algorithm>
+#include <vector>
+#include <string>
 #include "popt_pp.h"
 
 using namespace std;
@@ -16,17 +20,93 @@ vector< vector< Point2d > > left_img_points, right_img_points;
 
 Mat img1, img2, gray1, gray2, spl1, spl2;
 
+// Helper function to find all matching image files in a directory
+vector<int> find_image_indices(const char* img_dir, const char* prefix, const char* extension) {
+  vector<int> indices;
+  DIR* dir = opendir(img_dir);
+  if (dir == NULL) {
+    cerr << "Error: Cannot open directory " << img_dir << endl;
+    return indices;
+  }
+  
+  struct dirent* entry;
+  string prefix_str(prefix);
+  string ext_str(extension);
+  
+  while ((entry = readdir(dir)) != NULL) {
+    string filename(entry->d_name);
+    
+    // Check if filename starts with prefix and ends with extension
+    if (filename.find(prefix_str) == 0 && 
+        filename.length() > ext_str.length() &&
+        filename.substr(filename.length() - ext_str.length()) == ext_str) {
+      
+      // Extract the number between prefix and extension
+      string number_part = filename.substr(prefix_str.length(), 
+                                          filename.length() - prefix_str.length() - ext_str.length() - 1);
+      
+      // Try to parse the number
+      try {
+        int idx = stoi(number_part);
+        indices.push_back(idx);
+      } catch (...) {
+        // Skip files that don't have a valid number
+        continue;
+      }
+    }
+  }
+  
+  closedir(dir);
+  sort(indices.begin(), indices.end());
+  return indices;
+}
+
 void load_image_points(int board_width, int board_height, float square_size, int num_imgs, 
                       char* img_dir, char* leftimg_filename, char* rightimg_filename, char* extension) {
   Size board_size = Size(board_width, board_height);
   int board_n = board_width * board_height;
 
-  for (int i = 1; i <= num_imgs; i++) {
+  // Find all available image indices for left and right cameras
+  vector<int> left_indices = find_image_indices(img_dir, leftimg_filename, extension);
+  vector<int> right_indices = find_image_indices(img_dir, rightimg_filename, extension);
+  
+  // Find common indices (images that exist for both cameras)
+  vector<int> common_indices;
+  for (int idx : left_indices) {
+    if (find(right_indices.begin(), right_indices.end(), idx) != right_indices.end()) {
+      common_indices.push_back(idx);
+    }
+  }
+  
+  if (common_indices.empty()) {
+    cerr << "Error: No matching image pairs found in " << img_dir << endl;
+    cerr << "Left images found: " << left_indices.size() << endl;
+    cerr << "Right images found: " << right_indices.size() << endl;
+    return;
+  }
+  
+  printf("Found %zu image pairs with indices: ", common_indices.size());
+  for (size_t i = 0; i < min(common_indices.size(), size_t(10)); i++) {
+    printf("%d ", common_indices[i]);
+  }
+  if (common_indices.size() > 10) {
+    printf("... ");
+  }
+  printf("\n");
+
+  for (int i : common_indices) {
     char left_img[100], right_img[100];
     sprintf(left_img, "%s%s%d.%s", img_dir, leftimg_filename, i, extension);
     sprintf(right_img, "%s%s%d.%s", img_dir, rightimg_filename, i, extension);
     img1 = imread(left_img, cv::IMREAD_COLOR);
     img2 = imread(right_img, cv::IMREAD_COLOR);
+    
+    // Check if images were loaded successfully
+    if (img1.empty() || img2.empty()) {
+      cerr << "Warning: Failed to load image pair " << i << ", skipping..." << endl;
+      continue;
+    }
+    
     cv::cvtColor(img1, gray1, cv::COLOR_BGR2GRAY);
     cv::cvtColor(img2, gray2, cv::COLOR_BGR2GRAY);
 
@@ -109,6 +189,36 @@ int main(int argc, char const *argv[])
 
   load_image_points(board_width, board_height, square_size, num_imgs, img_dir, leftimg_filename, rightimg_filename, extension);
 
+  // Validate that we have sufficient image points for calibration
+  if (object_points.empty() || left_img_points.empty() || right_img_points.empty()) {
+    printf("\n");
+    printf("╔════════════════════════════════════════════════════════════════════════════╗\n");
+    printf("║         ERROR: NO VALID IMAGE PAIRS FOUND FOR CALIBRATION                 ║\n");
+    printf("╚════════════════════════════════════════════════════════════════════════════╝\n");
+    printf("\n");
+    printf("Error details:\n");
+    printf("  - Object points collected: %zu\n", object_points.size());
+    printf("  - Left image points collected: %zu\n", left_img_points.size());
+    printf("  - Right image points collected: %zu\n", right_img_points.size());
+    printf("\n");
+    printf("Possible causes:\n");
+    printf("  1. No image files found in directory: %s\n", img_dir);
+    printf("  2. Image naming doesn't match pattern: %s<N>.%s and %s<N>.%s\n", 
+           leftimg_filename, extension, rightimg_filename, extension);
+    printf("  3. Chessboard corners could not be detected in any image pairs\n");
+    printf("  4. Images were removed during quality checks but directory is now empty\n");
+    printf("\n");
+    printf("Solutions:\n");
+    printf("  1. Verify images exist in the specified directory\n");
+    printf("  2. Check that image filenames follow the expected pattern\n");
+    printf("  3. Verify chessboard dimensions (-w and -h) are correct\n");
+    printf("  4. Check image quality (focus, lighting, chessboard visibility)\n");
+    printf("  5. If using quality checks, ensure some images remain after filtering\n");
+    printf("\n");
+    return 1;
+  }
+  
+  printf("Successfully loaded %zu valid image pairs for calibration\n", object_points.size());
   printf("Starting Calibration\n");
   cv::Matx33d K1, K2, R;
   cv::Vec3d T;
