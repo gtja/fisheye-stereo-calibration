@@ -112,7 +112,7 @@ You can also optionally specify the physical baseline distance (in meters) to ev
 
 ### Camera Models
 
-The calibration program supports two camera models:
+The calibration program supports three camera models:
 
 #### Fisheye Model (Default)
 
@@ -123,6 +123,25 @@ The standard fisheye model works well for most fisheye lenses up to ~200° FOV. 
 # Or explicitly:
 ./calibrate -w 9 -h 6 -s 0.02423 -d ../imgs/ -l left -r right -m fisheye -o cam_stereo.yml
 ```
+
+#### 🆕 Double-Sphere Model (Recommended for High Precision)
+
+For applications requiring sub-pixel accuracy (<0.15 pixels) or extreme fisheye lenses, the Double-Sphere model with 6-order radial distortion and Ceres Bundle Adjustment provides superior results:
+
+```bash
+./calibrate_ds -w 9 -h 6 -s 0.02423 -d ../imgs/ -l left -r right -o cam_stereo_ds.yml
+```
+
+**Features:**
+- 6-order radial distortion (k1-k6) for better edge modeling
+- Double-Sphere projection (Usenko et al., 2018)
+- SE(3) pre-correction for improved corner detection
+- Ceres-based Bundle Adjustment with Huber robust kernel
+- Typically achieves 0.1-0.15 pixels RMSE (vs 0.3 pixels with standard methods)
+
+**Requirements:** Ceres Solver must be installed (`sudo apt-get install libceres-dev`)
+
+See [DOUBLE_SPHERE_CALIBRATION.md](DOUBLE_SPHERE_CALIBRATION.md) for detailed documentation.
 
 ####  MEI/Omnidirectional Model (Experimental)
 

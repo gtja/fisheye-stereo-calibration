@@ -16,6 +16,9 @@ BLUR_THRESHOLD=${BLUR_THRESHOLD:-100}
 # Enable quality checks by default (set to "false" to disable)
 RUN_QUALITY_CHECKS=${RUN_QUALITY_CHECKS:-true}
 
+# Choose calibration model: "standard" or "double_sphere"
+CALIBRATION_MODEL=${CALIBRATION_MODEL:-standard}
+
 # Create output directory if it doesn't exist
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
@@ -82,10 +85,18 @@ if [ $# -gt 0 ]; then
         
         echo ""
         echo "╔════════════════════════════════════════════════════════════════════════════╗"
-        echo "║         RUNNING STEREO CALIBRATION                                         ║"
+        if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+            echo "║         RUNNING DOUBLE-SPHERE STEREO CALIBRATION                           ║"
+        else
+            echo "║         RUNNING STEREO CALIBRATION                                         ║"
+        fi
         echo "╚════════════════════════════════════════════════════════════════════════════╝"
         echo ""
-        exec ./calibrate "${args[@]}"
+        if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+            exec ./calibrate_ds "${args[@]}"
+        else
+            exec ./calibrate "${args[@]}"
+        fi
     else
         exec ./calibrate "$@"
     fi
@@ -103,6 +114,7 @@ else
     echo "  Output file: $OUTPUT_FILE"
     echo "  Quality checks: $RUN_QUALITY_CHECKS"
     echo "  Blur threshold: $BLUR_THRESHOLD"
+    echo "  Calibration model: $CALIBRATION_MODEL"
     
     # Run quality checks if enabled
     if [ "$RUN_QUALITY_CHECKS" = "true" ]; then
@@ -111,18 +123,36 @@ else
     
     echo ""
     echo "╔════════════════════════════════════════════════════════════════════════════╗"
-    echo "║         RUNNING STEREO CALIBRATION                                         ║"
+    if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+        echo "║         RUNNING DOUBLE-SPHERE STEREO CALIBRATION                           ║"
+    else
+        echo "║         RUNNING STEREO CALIBRATION                                         ║"
+    fi
     echo "╚════════════════════════════════════════════════════════════════════════════╝"
     echo ""
     
-    exec ./calibrate \
-        -w "$BOARD_WIDTH" \
-        -h "$BOARD_HEIGHT" \
-        -s "$SQUARE_SIZE" \
-        -n "$NUM_IMGS" \
-        -d "$IMG_DIR" \
-        -l "$LEFT_PREFIX" \
-        -r "$RIGHT_PREFIX" \
-        -e "$IMAGE_EXTENSION" \
-        -o "$OUTPUT_FILE"
+    if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+        # Double-Sphere calibration (no -n parameter needed)
+        exec ./calibrate_ds \
+            -w "$BOARD_WIDTH" \
+            -h "$BOARD_HEIGHT" \
+            -s "$SQUARE_SIZE" \
+            -d "$IMG_DIR" \
+            -l "$LEFT_PREFIX" \
+            -r "$RIGHT_PREFIX" \
+            -e "$IMAGE_EXTENSION" \
+            -o "$OUTPUT_FILE"
+    else
+        # Standard calibration
+        exec ./calibrate \
+            -w "$BOARD_WIDTH" \
+            -h "$BOARD_HEIGHT" \
+            -s "$SQUARE_SIZE" \
+            -n "$NUM_IMGS" \
+            -d "$IMG_DIR" \
+            -l "$LEFT_PREFIX" \
+            -r "$RIGHT_PREFIX" \
+            -e "$IMAGE_EXTENSION" \
+            -o "$OUTPUT_FILE"
+    fi
 fi

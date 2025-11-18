@@ -9,8 +9,15 @@ set(OpenCV_DIR "/usr/local/lib/cmake/opencv4" CACHE PATH "OpenCV directory overr
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
+find_package(Ceres REQUIRED)
+include_directories(${CERES_INCLUDE_DIRS})
+
 message(STATUS "OpenCV version: ${OpenCV_VERSION}")
 message(STATUS "OpenCV include dirs: ${OpenCV_INCLUDE_DIRS}")
+message(STATUS "Ceres include dirs: ${CERES_INCLUDE_DIRS}")
 
 add_executable(calibrate calibrate.cpp)
 target_link_libraries(calibrate ${OpenCV_LIBS} "-lpopt")
+
+add_executable(calibrate_ds calibrate_ds.cpp)
+target_link_libraries(calibrate_ds ${OpenCV_LIBS} ${CERES_LIBRARIES} "-lpopt")
