@@ -31,7 +31,7 @@ These tools help identify problematic images before calibration, potentially red
 
 ### Dependencies
 
-- OpenCV (version 3.4)
+- OpenCV (version 4.7.0 with contrib modules)
 - popt
 
 ### Docker Usage (Recommended)
@@ -134,7 +134,7 @@ For extreme wide-angle lenses (FOV > 200°, such as 220°), the MEI (Unified Cam
 ./calibrate -w 9 -h 6 -s 0.02423 -d ../imgs/ -l left -r right -m omnidir -o cam_stereo.yml
 ```
 
-**Note**: The omnidir/MEI model support is currently experimental due to compatibility issues with OpenCV 4.6.0's omnidir module. The implementation is complete but may require OpenCV contrib modules to be properly configured or a newer version of OpenCV. For production use with extreme wide-angle lenses, consider using external calibration tools like [Kalibr](https://github.com/ethz-asl/kalibr) or [Basalt](https://gitlab.com/VladyslavUsenko/basalt) which have more mature omnidirectional camera support.
+**Note**: The omnidir/MEI model requires OpenCV contrib modules. When using Docker (recommended), OpenCV 4.7.0 with contrib modules is automatically built and configured. For manual compilation, ensure you have opencv_contrib installed. For alternative production-ready tools with extreme wide-angle lenses, consider [Kalibr](https://github.com/ethz-asl/kalibr) or [Basalt](https://gitlab.com/VladyslavUsenko/basalt).
 
 ### Calibration Accuracy Evaluation
 
