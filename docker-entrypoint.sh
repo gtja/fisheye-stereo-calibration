@@ -86,6 +86,13 @@ if [ $# -gt 0 ]; then
         # This removes invalid images from the directory, so calibration will only find valid ones
         run_quality_checks
         
+        # Update -d parameter in args to point to the filtered directory
+        for i in "${!args[@]}"; do
+            if [ "${args[$i]}" = "-d" ]; then
+                args[$((i+1))]="$IMG_DIR"
+            fi
+        done
+        
         # Handle -n parameter based on calibration model
         if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
             # Double-sphere model doesn't support -n parameter, remove it from args
@@ -108,7 +115,7 @@ if [ $# -gt 0 ]; then
             # Standard model: update -n parameter with validated count if provided
             for i in "${!args[@]}"; do
                 if [ "${args[$i]}" = "-n" ]; then
-                    args[i+1]="$NUM_IMGS"
+                    args[$((i+1))]="$NUM_IMGS"
                 fi
             done
         fi
