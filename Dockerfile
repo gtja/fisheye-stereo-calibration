@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:18.04
 
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -22,14 +22,14 @@ RUN apt-get update && apt-get install -y \
     libjpeg-dev \
     libpng-dev \
     libtiff-dev \
-    libdc1394-dev \
+    libdc1394-22-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and build OpenCV 3.2.0
+# Download and build OpenCV 3.4.20
 RUN cd /tmp && \
-    wget -O opencv.zip https://github.com/opencv/opencv/archive/3.2.0.zip && \
+    wget --no-check-certificate -O opencv.zip https://github.com/opencv/opencv/archive/3.4.20.zip && \
     unzip opencv.zip && \
-    cd opencv-3.2.0 && \
+    cd opencv-3.4.20 && \
     mkdir build && \
     cd build && \
     cmake -D CMAKE_BUILD_TYPE=RELEASE \
