@@ -3,6 +3,10 @@ FROM ubuntu:18.04
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Set UTF-8 locale for Python scripts with Unicode characters
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
 # Install dependencies for building OpenCV 3.4 and Python utilities
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -13,7 +17,8 @@ RUN apt-get update && apt-get install -y \
     libpopt-dev \
     # Python dependencies for utility scripts
     python3 \
-    python3-pip \
+    python3-opencv \
+    python3-numpy \
     # OpenCV dependencies
     libgtk2.0-dev \
     pkg-config \
@@ -47,9 +52,6 @@ RUN cd /tmp && \
     ldconfig && \
     cd / && \
     rm -rf /tmp/opencv*
-
-# Install Python packages for utility scripts
-RUN pip3 install --no-cache-dir opencv-python numpy
 
 # Set working directory
 WORKDIR /app
