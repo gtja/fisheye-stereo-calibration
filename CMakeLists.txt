@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.11)
+cmake_minimum_required(VERSION 3.10)
 project(FISHEYE_STEREO)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
