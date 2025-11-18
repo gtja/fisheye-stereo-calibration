@@ -57,3 +57,31 @@ For example if you use the images in the `imgs` folder run the following command
 ```bash
 ./calibrate -w 9 -h 6 -s 0.02423 -n 29 -d ../imgs/ -l left -r right -o cam_stereo.yml
 ```
+
+You can also optionally specify the physical baseline distance (in meters) to evaluate the baseline calibration accuracy:
+
+```bash
+./calibrate -w 9 -h 6 -s 0.02423 -n 29 -d ../imgs/ -l left -r right -o cam_stereo.yml -b 0.110
+```
+
+### Calibration Accuracy Evaluation
+
+The calibration program automatically evaluates the accuracy of the calibration and outputs the following metrics:
+
+1. **Monocular Reprojection Error**: The error between detected 2D corner points and projected 3D points using the calibrated camera model
+   - Calculated separately for left and right cameras
+   - Target threshold: < 0.3 pixels (average)
+
+2. **Stereo Reprojection Error**: The error when projecting 3D points through the left camera, transforming to right camera coordinates, and reprojecting
+   - Target threshold: < 0.3 pixels (average)
+
+3. **Maximum Stereo Reprojection Error**: The maximum reprojection error across all corner points
+   - Target threshold: < 1.5 pixels
+
+4. **Stereo Rectification Error**: The average y-coordinate difference for corresponding points after rectification
+   - Target threshold: < 0.3 pixels
+
+5. **Baseline Distance**: Comparison between the calibrated baseline and physical baseline (if provided)
+   - Target threshold: < 1 mm difference
+
+All evaluation metrics are displayed in the console output and saved to the output YAML file.
