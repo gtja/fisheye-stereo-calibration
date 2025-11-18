@@ -79,10 +79,12 @@ void load_image_points_with_precorrection(int board_width, int board_height, flo
     
     if (common_indices.empty()) {
         cerr << "Error: No matching image pairs found" << endl;
+        cerr.flush();
         return;
     }
     
     printf("Found %zu image pairs\n", common_indices.size());
+    fflush(stdout);
     
     // Create rectification maps for pre-correction
     Mat map_left_x, map_left_y, map_right_x, map_right_y;
@@ -222,6 +224,7 @@ int main(int argc, char const *argv[])
     char* extension = (char*)"jpg";
 
     printf("[LOG] Initializing popt options...\n");
+    fflush(stdout);
     static struct poptOption options[] = {
         { "board_width",'w',POPT_ARG_INT,&board_width,0,"Checkerboard width","NUM" },
         { "board_height",'h',POPT_ARG_INT,&board_height,0,"Checkerboard height","NUM" },
@@ -236,16 +239,20 @@ int main(int argc, char const *argv[])
     };
 
     printf("[LOG] Creating POpt object...\n");
+    fflush(stdout);
     POpt popt(NULL, argc, argv, options, 0);
     int c;
     printf("[LOG] Starting popt argument parsing...\n");
+    fflush(stdout);
     while((c = popt.getNextOpt()) >= 0) {}
     
     printf("========== Double-Sphere Camera Calibration ==========\n");
     printf("Using DS model + 6-order radial distortion + Ceres BA\n\n");
+    fflush(stdout);
     
     // Step 1: Initial KB4 coarse calibration using OpenCV fisheye
     printf("Step 1: KB4 Coarse Calibration (initial guess)...\n");
+    fflush(stdout);
     
     // Load images for initial calibration
     vector<int> left_indices = find_image_indices(img_dir, leftimg_filename, extension);
@@ -260,6 +267,7 @@ int main(int argc, char const *argv[])
     
     if (common_indices.empty()) {
         cerr << "Error: No matching image pairs found" << endl;
+        cerr.flush();
         return 1;
     }
     
@@ -318,10 +326,34 @@ int main(int argc, char const *argv[])
     
     if (obj_pts_init.empty()) {
         cerr << "Error: No valid corners detected for initial calibration" << endl;
+        cerr.flush();
         return 1;
     }
     
     printf("Initial calibration: %zu image pairs\n", obj_pts_init.size());
+    fflush(stdout);
+    
+    // Validate we have enough image pairs for calibration
+    if (obj_pts_init.size() < 3) {
+        cerr << "Error: Need at least 3 image pairs for stereo calibration, got " << obj_pts_init.size() << endl;
+        cerr.flush();
+        return 1;
+    }
+    
+    // Validate image points data
+    for (size_t i = 0; i < obj_pts_init.size(); i++) {
+        if (obj_pts_init[i].size() != left_pts_init[i].size() || 
+            obj_pts_init[i].size() != right_pts_init[i].size()) {
+            cerr << "Error: Mismatched point counts at image pair " << i << endl;
+            cerr.flush();
+            return 1;
+        }
+        if (obj_pts_init[i].size() < 4) {
+            cerr << "Error: Not enough points at image pair " << i << " (got " << obj_pts_init[i].size() << ")" << endl;
+            cerr.flush();
+            return 1;
+        }
+    }
     
     // Run OpenCV fisheye calibration for KB4 initial guess
     Matx33d K1_kb4, K2_kb4, R_kb4;
@@ -332,15 +364,30 @@ int main(int argc, char const *argv[])
     flag |= fisheye::CALIB_RECOMPUTE_EXTRINSIC;
     flag |= fisheye::CALIB_FIX_SKEW;
     
-    fisheye::stereoCalibrate(obj_pts_init, left_pts_init, right_pts_init,
-                            K1_kb4, D1_kb4, K2_kb4, D2_kb4, img1.size(), R_kb4, T_kb4, flag,
-                            TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
+    printf("Attempting fisheye::stereoCalibrate with %zu image pairs...\n", obj_pts_init.size());
+    fflush(stdout);
+    
+    try {
+        fisheye::stereoCalibrate(obj_pts_init, left_pts_init, right_pts_init,
+                                K1_kb4, D1_kb4, K2_kb4, D2_kb4, img1.size(), R_kb4, T_kb4, flag,
+                                TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
+    } catch (const cv::Exception& e) {
+        cerr << "Error in fisheye::stereoCalibrate: " << e.what() << endl;
+        cerr << "This usually indicates issues with the calibration images:" << endl;
+        cerr << "  - Images may have excessive distortion" << endl;
+        cerr << "  - Checkerboard corners may not be detected accurately" << endl;
+        cerr << "  - Image pairs may not show the same checkerboard view" << endl;
+        cerr << "  - Need more or better quality calibration images" << endl;
+        cerr.flush();
+        return 1;
+    }
     
     printf("KB4 calibration complete\n");
     printf("  Left camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n", 
            K1_kb4(0,0), K1_kb4(1,1), K1_kb4(0,2), K1_kb4(1,2));
     printf("  Right camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n",
            K2_kb4(0,0), K2_kb4(1,1), K2_kb4(0,2), K2_kb4(1,2));
+    fflush(stdout);
     
     // Create KB4 parameters
     kb4::KB4Params kb4_left(K1_kb4, D1_kb4);
@@ -348,6 +395,7 @@ int main(int argc, char const *argv[])
     
     // Step 2: Load image points with SE(3) pre-correction
     printf("\nStep 2: Corner detection with SE(3) pre-correction...\n");
+    fflush(stdout);
     object_points.clear();
     left_img_points.clear();
     right_img_points.clear();
@@ -358,13 +406,16 @@ int main(int argc, char const *argv[])
     
     if (object_points.empty()) {
         cerr << "Error: No valid image pairs after pre-correction" << endl;
+        cerr.flush();
         return 1;
     }
     
     printf("Collected %zu image pairs with pre-correction\n", object_points.size());
+    fflush(stdout);
     
     // Step 3: Initialize Double-Sphere parameters from KB4
     printf("\nStep 3: Initializing Double-Sphere parameters...\n");
+    fflush(stdout);
     
     double_sphere::DoubleSphereParams ds_left, ds_right;
     
@@ -397,6 +448,7 @@ int main(int argc, char const *argv[])
     
     // Step 4: Bundle Adjustment with Ceres
     printf("\nStep 4: Bundle Adjustment with Ceres Solver...\n");
+    fflush(stdout);
     
     // Camera intrinsics arrays: [fx, fy, cx, cy, xi, alpha, k1, k2, k3, k4, k5, k6]
     double camera_intrinsics_left[12] = {
@@ -602,6 +654,7 @@ int main(int argc, char const *argv[])
     
     // Save results to file
     printf("\nSaving calibration results to %s...\n", out_file);
+    fflush(stdout);
     
     FileStorage fs(out_file, FileStorage::WRITE);
     fs << "model_type" << "double_sphere";
@@ -653,6 +706,7 @@ int main(int argc, char const *argv[])
     printf("  xi=%.6f, alpha=%.6f\n", ds_right.xi, ds_right.alpha);
     printf("  k1-k6: %.6f, %.6f, %.6f, %.6f, %.6f, %.6f\n",
            ds_right.k1, ds_right.k2, ds_right.k3, ds_right.k4, ds_right.k5, ds_right.k6);
+    fflush(stdout);
     
     // Cleanup
     for (auto* ptr : camera_extrinsics_left) delete[] ptr;
