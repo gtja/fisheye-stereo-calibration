@@ -1,12 +1,57 @@
 # Docker Usage for Fisheye Stereo Calibration
 
-This document explains how to use the Docker container to run the fisheye stereo calibration.
+This document explains how to use the Docker container to run the fisheye stereo calibration with the complete workflow including quality checks.
 
 ## Building the Docker Image
 
 ```bash
 docker build -t fisheye-stereo-calibration .
 ```
+
+## Recommended Workflow
+
+For best calibration results, follow this complete workflow:
+
+### Step 1: Capture Images
+Follow guidelines in [CALIBRATION_GUIDE.md](CALIBRATION_GUIDE.md):
+- 30-40 images minimum
+- Cover all 4 edges
+- Various tilts and rotations
+
+### Step 2: Check for Blur
+```bash
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/laplacian_var.py /data/imgs/ --threshold 100
+```
+Remove any blurry images identified (Laplacian variance < 100).
+
+### Step 3: Analyze Corner Quality
+```bash
+# For left camera images
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/corner_analysis.py /data/imgs/ --width 9 --height 6 --prefix left
+
+# For right camera images
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/corner_analysis.py /data/imgs/ --width 9 --height 6 --prefix right
+```
+
+To save corner visualizations:
+```bash
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/corner_analysis.py /data/imgs/ --width 9 --height 6 --prefix left --save
+```
+
+### Step 4: Run Calibration
+See sections below for running the calibration.
+
+### Step 5: Review Results
+- Target: < 0.3 pixel reprojection error
+- If errors are high, review data quality and capture guidelines
 
 ## Running the Calibration
 
@@ -122,6 +167,54 @@ The calibration will generate a YAML file with the following calibration paramet
 - `-o, --out_file STR`: Output calibration file path (YAML format)
 - `-b, --physical_baseline NUM`: Physical baseline distance in meters (optional, for accuracy evaluation)
 
+## Utility Scripts
+
+The Docker image includes Python utility scripts to help improve calibration quality. These scripts are located in `/app/utils/` inside the container.
+
+### Blur Detection (laplacian_var.py)
+
+Detect blurry images using Laplacian variance:
+
+```bash
+# Check all images
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/laplacian_var.py /data/imgs/ --threshold 100
+
+# Check with custom threshold
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/laplacian_var.py /data/imgs/ --threshold 150
+
+# Check BMP images
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/laplacian_var.py /data/imgs/ --extension bmp --threshold 100
+```
+
+### Corner Quality Analysis (corner_analysis.py)
+
+Analyze corner detection quality and distribution:
+
+```bash
+# Analyze left camera images
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/corner_analysis.py /data/imgs/ --width 9 --height 6 --prefix left
+
+# Save visualizations (output to mounted directory)
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/corner_analysis.py /data/imgs/ --width 9 --height 6 --prefix left --save
+
+# Analyze with different board dimensions
+docker run --rm -v /path/to/your/imgs:/data/imgs \
+  fisheye-stereo-calibration \
+  python3 /app/utils/corner_analysis.py /data/imgs/ --width 8 --height 5 --prefix right
+```
+
+**Note**: These scripts help identify problematic images before calibration, potentially reducing errors by 30-50%. See [utils/README.md](utils/README.md) for detailed documentation.
+
 ## Troubleshooting
 
 ### Permission Issues
@@ -143,3 +236,11 @@ Make sure:
 3. The extension parameter matches your image file format (use `-e bmp` for BMP files, `-e png` for PNG files, etc.)
 4. The number of images specified matches the actual number of image pairs
 5. The directory path ends with a `/`
+
+### Utility Scripts Not Working
+
+If utility scripts fail:
+1. Ensure the image directory is correctly mounted
+2. Check Python packages are installed (they should be included in the image)
+3. Verify image files exist and are readable
+4. For BMP/PNG files, use the `--extension` parameter
