@@ -6,7 +6,7 @@ This contains a source file to calibrate a stereo system comprising of fisheye l
 
 ### Dependencies
 
-- OpenCV (version 4.x recommended)
+- OpenCV (version 3.4)
 - popt
 
 ### Docker Usage (Recommended)
