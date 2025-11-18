@@ -74,14 +74,35 @@ if [ $# -gt 0 ]; then
         done
         
         # Run quality checks before calibration
+        # This removes invalid images from the directory, so calibration will only find valid ones
         run_quality_checks
         
-        # If -n parameter was provided, override with validated count
-        for i in "${!args[@]}"; do
-            if [ "${args[$i]}" = "-n" ]; then
-                args[$((i+1))]="$NUM_IMGS"
-            fi
-        done
+        # Handle -n parameter based on calibration model
+        if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+            # Double-sphere model doesn't support -n parameter, remove it from args
+            # It will use all images found in the directory (filtered by quality checks)
+            new_args=()
+            skip_next=false
+            for i in "${!args[@]}"; do
+                if [ "$skip_next" = true ]; then
+                    skip_next=false
+                    continue
+                fi
+                if [ "${args[$i]}" = "-n" ]; then
+                    skip_next=true
+                    continue
+                fi
+                new_args+=("${args[$i]}")
+            done
+            args=("${new_args[@]}")
+        else
+            # Standard model: update -n parameter with validated count if provided
+            for i in "${!args[@]}"; do
+                if [ "${args[$i]}" = "-n" ]; then
+                    args[i+1]="$NUM_IMGS"
+                fi
+            done
+        fi
         
         echo ""
         echo "╔════════════════════════════════════════════════════════════════════════════╗"
