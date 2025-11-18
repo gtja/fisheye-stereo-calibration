@@ -497,7 +497,8 @@ int main(int argc, char const *argv[])
     ceres::Solver::Summary summary;
     ceres::Solve(solver_options, &problem, &summary);
     
-    printf("\n%s\n", summary.BriefReport().c_str());
+    std::string brief_report = summary.BriefReport();
+    printf("\n%s\n", brief_report.c_str());
     printf("Final RMSE: %.6f pixels\n", sqrt(summary.final_cost / summary.num_residuals));
     
     // Extract optimized parameters
