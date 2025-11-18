@@ -33,15 +33,18 @@ RUN apt-get update && apt-get install -y \
     libdc1394-22-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and build OpenCV 3.4.20
+# Download and build OpenCV 3.4.20 with contrib modules
 RUN cd /tmp && \
     wget --no-check-certificate -O opencv.zip https://github.com/opencv/opencv/archive/3.4.20.zip && \
+    wget --no-check-certificate -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/3.4.20.zip && \
     unzip opencv.zip && \
+    unzip opencv_contrib.zip && \
     cd opencv-3.4.20 && \
     mkdir build && \
     cd build && \
     cmake -D CMAKE_BUILD_TYPE=RELEASE \
           -D CMAKE_INSTALL_PREFIX=/usr/local \
+          -D OPENCV_EXTRA_MODULES_PATH=/tmp/opencv_contrib-3.4.20/modules \
           -D WITH_TBB=ON \
           -D WITH_V4L=ON \
           -D WITH_QT=OFF \
