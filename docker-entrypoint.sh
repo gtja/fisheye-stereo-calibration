@@ -123,7 +123,7 @@ if [ $# -gt 0 ]; then
         echo ""
         echo "╔════════════════════════════════════════════════════════════════════════════╗"
         if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
-            echo "║         1RUNNING DOUBLE-SPHERE STEREO CALIBRATION                           ║"
+            echo "║         RUNNING DOUBLE-SPHERE STEREO CALIBRATION                            ║"
         else
             echo "║         RUNNING STEREO CALIBRATION                                         ║"
         fi
