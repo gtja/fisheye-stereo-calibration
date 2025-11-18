@@ -49,8 +49,11 @@ RUN cd /tmp && \
           -D WITH_V4L=ON \
           -D WITH_QT=OFF \
           -D WITH_OPENGL=ON \
+          -D BUILD_EXAMPLES=OFF \
+          -D BUILD_TESTS=OFF \
+          -D BUILD_PERF_TESTS=OFF \
           .. && \
-    make -j$(nproc) && \
+    make -j2 && \
     make install && \
     ldconfig && \
     cd / && \
@@ -69,7 +72,7 @@ RUN chmod +x /app/utils/*.py
 RUN mkdir -p build && \
     cd build && \
     cmake .. && \
-    make
+    make 
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/
