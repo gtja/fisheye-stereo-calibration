@@ -3,13 +3,47 @@ FROM ubuntu:22.04
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install dependencies
+# Install dependencies for building OpenCV 3.2
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
-    libopencv-dev \
+    git \
+    wget \
+    unzip \
     libpopt-dev \
+    # OpenCV dependencies
+    libgtk2.0-dev \
+    pkg-config \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libtbb2 \
+    libtbb-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    libdc1394-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Download and build OpenCV 3.2.0
+RUN cd /tmp && \
+    wget -O opencv.zip https://github.com/opencv/opencv/archive/3.2.0.zip && \
+    unzip opencv.zip && \
+    cd opencv-3.2.0 && \
+    mkdir build && \
+    cd build && \
+    cmake -D CMAKE_BUILD_TYPE=RELEASE \
+          -D CMAKE_INSTALL_PREFIX=/usr/local \
+          -D WITH_TBB=ON \
+          -D WITH_V4L=ON \
+          -D WITH_QT=OFF \
+          -D WITH_OPENGL=ON \
+          .. && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    cd / && \
+    rm -rf /tmp/opencv*
 
 # Set working directory
 WORKDIR /app
