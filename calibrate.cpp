@@ -261,6 +261,7 @@ Q, cv::CALIB_ZERO_DISPARITY, img1.size(), 0.0, 1.1);
   
   // 4. Stereo Rectification Error
   double total_rectify_err = 0.0;
+  double max_rectify_err = 0.0;
   int rectify_points = 0;
   
   // Compute rectification maps
@@ -285,6 +286,9 @@ Q, cv::CALIB_ZERO_DISPARITY, img1.size(), 0.0, 1.1);
       if (left_rect_x >= 0 && left_rect_y >= 0 && right_rect_x >= 0 && right_rect_y >= 0) {
         double y_diff = fabs(left_rect_y - right_rect_y);
         total_rectify_err += y_diff;
+        if (y_diff > max_rectify_err) {
+          max_rectify_err = y_diff;
+        }
         rectify_points++;
       }
     }
@@ -295,6 +299,8 @@ Q, cv::CALIB_ZERO_DISPARITY, img1.size(), 0.0, 1.1);
   printf("\n4. Stereo Rectification Error:\n");
   printf("   Average Y-coordinate difference: %.4f pixels [threshold: < 0.3 pixel]\n", avg_rectify_err);
   printf("   Status: %s\n", avg_rectify_err < 0.3 ? "PASS" : "FAIL");
+  printf("   Maximum Y-coordinate difference: %.4f pixels [threshold: < 0.7 pixel]\n", max_rectify_err);
+  printf("   Status: %s\n", max_rectify_err < 0.7 ? "PASS" : "FAIL");
   
   // 5. Baseline Distance
   double calibrated_baseline = cv::norm(T); // in meters
@@ -319,6 +325,7 @@ Q, cv::CALIB_ZERO_DISPARITY, img1.size(), 0.0, 1.1);
   fs1 << "stereo_reprojection_error_avg" << avg_stereo_err;
   fs1 << "stereo_reprojection_error_max" << max_stereo_err;
   fs1 << "stereo_rectification_error_avg" << avg_rectify_err;
+  fs1 << "stereo_rectification_error_max" << max_rectify_err;
   fs1 << "calibrated_baseline" << calibrated_baseline;
   if (physical_baseline > 0) {
     fs1 << "physical_baseline" << physical_baseline;
