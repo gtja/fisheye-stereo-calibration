@@ -32,6 +32,12 @@ build/
 # Output directory
 output/
 
+# Filtered image directories
+*_filtered/
+.filtered_info
+.valid_image_count
+.removed_images_backup/
+
 # Python cache
 __pycache__/
 *.pyc

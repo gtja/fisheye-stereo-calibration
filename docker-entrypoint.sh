@@ -45,12 +45,21 @@ run_quality_checks() {
         exit $exit_code
     fi
     
-    # Read the validated image count
-    local count_file="$IMG_DIR/.valid_image_count"
-    if [ -f "$count_file" ]; then
-        NUM_IMGS=$(cat "$count_file")
-        echo ""
-        echo "Updated number of images for calibration: $NUM_IMGS"
+    # Read the filtered directory info
+    local info_file="$IMG_DIR/.filtered_info"
+    if [ -f "$info_file" ]; then
+        local filtered_dir=$(sed -n '1p' "$info_file")
+        local filtered_count=$(sed -n '2p' "$info_file")
+        
+        if [ -d "$filtered_dir" ]; then
+            echo ""
+            echo "Using filtered image directory: $filtered_dir"
+            echo "Updated number of images for calibration: $filtered_count"
+            
+            # Update IMG_DIR to point to filtered directory
+            IMG_DIR="$filtered_dir"
+            NUM_IMGS="$filtered_count"
+        fi
     fi
 }
 

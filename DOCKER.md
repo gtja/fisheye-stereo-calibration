@@ -6,19 +6,19 @@ This document explains how to use the Docker container to run the fisheye stereo
 
 The Docker container now includes **automatic pre-calibration quality checks** that run by default! This feature:
 
-✅ **Detects and removes blurry images** using Laplacian variance analysis  
+✅ **Detects blurry images** using Laplacian variance analysis  
 ✅ **Validates corner detection quality** for all images  
-✅ **Automatically filters out problematic images** that would degrade calibration accuracy  
-✅ **Backs up removed images** for review in `.removed_images_backup/` directory  
-✅ **Updates the image count** automatically for calibration  
+✅ **Creates a filtered directory** with only good images, renamed sequentially  
+✅ **Keeps original images intact** - nothing is deleted from the original directory  
+✅ **Updates the image directory path** automatically for calibration  
 
 This can improve calibration accuracy by **30-50%** by ensuring only high-quality images are used.
 
 **Key benefits:**
 - No manual pre-processing required
-- Consistent quality standards applied automatically
+- Original images remain untouched
+- Filtered images are sequentially numbered for easy tracking
 - Better calibration results with less effort
-- Problematic images are backed up (not permanently deleted)
 
 To disable automatic checks and use the original workflow, set `RUN_QUALITY_CHECKS=false`.
 
@@ -37,9 +37,9 @@ For best calibration results, follow this complete workflow:
 **NEW:** The Docker container now includes **automatic image quality checks** that run before calibration by default! This workflow:
 1. Checks all images for blur using Laplacian variance
 2. Analyzes corner detection quality and distribution
-3. Removes images that don't meet quality requirements
-4. Backs up removed images for review
-5. Runs calibration with the validated images
+3. Creates a new filtered directory with only good images
+4. Renames filtered images sequentially (left1.jpg, left2.jpg, ..., leftN.jpg)
+5. Runs calibration using the filtered directory (original images remain intact)
 
 Simply run:
 ```bash
@@ -53,8 +53,9 @@ docker run \
 The container will automatically:
 - Check for blurry images (Laplacian variance < 100)
 - Validate corner detection for all images
-- Remove problematic images (backed up to `.removed_images_backup/`)
-- Calibrate using only the validated images
+- Create a filtered directory (e.g., `/data/imgs_filtered/`) with only good images
+- Rename images sequentially in the filtered directory
+- Calibrate using the filtered directory (original images remain intact)
 
 **Customize quality check thresholds:**
 ```bash

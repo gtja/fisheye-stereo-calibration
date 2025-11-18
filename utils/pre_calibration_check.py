@@ -2,8 +2,8 @@
 """
 Pre-Calibration Image Quality Check Script
 
-This script automatically checks calibration images for quality issues and removes
-problematic images before running calibration. It integrates:
+This script automatically checks calibration images for quality issues and creates
+a new directory with filtered, sequentially-named images for calibration. It integrates:
 1. Blur detection using Laplacian variance
 2. Corner detection quality analysis
 
@@ -18,13 +18,13 @@ Arguments:
     --extension: Image file extension (default: jpg)
     --left-prefix: Left camera image prefix (default: left)
     --right-prefix: Right camera image prefix (default: right)
-    --backup: Create backup of removed images (default: True)
+    --output-dir: Output directory for filtered images (default: <image_dir>_filtered)
 
 The script will:
 1. Check all images for blur
-2. Remove blurry images
-3. Check remaining images for corner detection quality
-4. Remove images with poor corner detection
+2. Check images for corner detection quality
+3. Create a new directory with only good images
+4. Rename images sequentially (left1.ext, left2.ext, ..., leftN.ext)
 5. Report the final count of valid images for calibration
 """
 
@@ -42,28 +42,19 @@ from laplacian_var import calculate_laplacian_variance
 from corner_analysis import analyze_image as analyze_corners
 
 
-def backup_image(image_path, backup_dir):
-    """Create a backup of an image before removing it."""
-    backup_dir = Path(backup_dir)
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    backup_path = backup_dir / image_path.name
-    shutil.copy2(image_path, backup_path)
-    return backup_path
-
-
-def check_blur(image_dir, threshold, extension, backup_dir=None):
+def check_blur(image_dir, threshold, extension):
     """
-    Check all images for blur and remove blurry ones.
+    Check all images for blur.
     
     Returns:
-        List of images that passed the blur check
+        Dictionary mapping image paths to their blur status (True = sharp, False = blurry)
     """
     image_dir = Path(image_dir)
     image_files = sorted(image_dir.glob(f'*.{extension}'))
     
     if not image_files:
         print(f"No .{extension} images found in {image_dir}")
-        return []
+        return {}
     
     print("=" * 80)
     print("STEP 1: BLUR DETECTION")
@@ -72,53 +63,45 @@ def check_blur(image_dir, threshold, extension, backup_dir=None):
     print(f"Blur threshold: Laplacian variance < {threshold}")
     print("-" * 80)
     
-    blurry_images = []
-    sharp_images = []
+    blur_status = {}
+    blurry_count = 0
+    sharp_count = 0
     
     for img_path in image_files:
         variance = calculate_laplacian_variance(img_path)
         
         if variance is None:
             print(f"ERROR: Could not read {img_path.name}")
+            blur_status[img_path] = False
             continue
         
-        status = "SHARP" if variance >= threshold else "BLURRY"
-        symbol = "✓" if variance >= threshold else "✗"
+        is_sharp = variance >= threshold
+        blur_status[img_path] = is_sharp
+        
+        status = "SHARP" if is_sharp else "BLURRY"
+        symbol = "✓" if is_sharp else "✗"
         
         print(f"{symbol} {img_path.name:30s} Laplacian var: {variance:8.2f} [{status}]")
         
-        if variance < threshold:
-            blurry_images.append(img_path)
+        if is_sharp:
+            sharp_count += 1
         else:
-            sharp_images.append(img_path)
+            blurry_count += 1
     
     print("-" * 80)
-    print(f"Sharp images:  {len(sharp_images)} / {len(image_files)}")
-    print(f"Blurry images: {len(blurry_images)} / {len(image_files)}")
+    print(f"Sharp images:  {sharp_count} / {len(image_files)}")
+    print(f"Blurry images: {blurry_count} / {len(image_files)}")
+    print()
     
-    # Remove blurry images
-    if blurry_images:
-        print(f"\nRemoving {len(blurry_images)} blurry images...")
-        for img in blurry_images:
-            if backup_dir:
-                backup_path = backup_image(img, backup_dir)
-                print(f"  Backed up and removed: {img.name} -> {backup_path}")
-            else:
-                print(f"  Removed: {img.name}")
-            img.unlink()
-        print("Blur check complete.\n")
-    else:
-        print("✓ All images pass blur check!\n")
-    
-    return sharp_images
+    return blur_status
 
 
-def check_corners(image_dir, board_width, board_height, extension, left_prefix, right_prefix, backup_dir=None):
+def check_corners(image_dir, board_width, board_height, extension, left_prefix, right_prefix, blur_status):
     """
-    Check images for corner detection quality and remove problematic ones.
+    Check images for corner detection quality.
     
     Returns:
-        Dictionary with counts of valid images per camera
+        Dictionary mapping image paths to corner quality status ('good', 'warning', 'failed')
     """
     image_dir = Path(image_dir)
     
@@ -128,7 +111,7 @@ def check_corners(image_dir, board_width, board_height, extension, left_prefix, 
     print(f"Chessboard size: {board_width}x{board_height} (inner corners)")
     print(f"Expected corners per image: {board_width * board_height}")
     
-    results = {'left': 0, 'right': 0}
+    corner_status = {}
     
     for prefix in [left_prefix, right_prefix]:
         image_files = sorted(image_dir.glob(f"{prefix}*.{extension}"))
@@ -140,19 +123,28 @@ def check_corners(image_dir, board_width, board_height, extension, left_prefix, 
         print(f"\n--- Analyzing {len(image_files)} {prefix} camera images ---")
         print("-" * 80)
         
-        failed_images = []
-        warning_images = []
-        good_images = []
+        failed_count = 0
+        warning_count = 0
+        good_count = 0
         
         for img_path in image_files:
+            # Skip blurry images
+            if not blur_status.get(img_path, False):
+                corner_status[img_path] = 'failed'
+                failed_count += 1
+                print(f"✗ {img_path.name:30s} SKIPPED (BLURRY)")
+                continue
+            
             result = analyze_corners(img_path, board_width, board_height, False, False, None)
             
             if 'error' in result:
                 print(f"✗ {img_path.name:30s} ERROR: {result['error']}")
-                failed_images.append(img_path)
+                corner_status[img_path] = 'failed'
+                failed_count += 1
             elif not result['found']:
                 print(f"✗ {img_path.name:30s} NO CORNERS DETECTED")
-                failed_images.append(img_path)
+                corner_status[img_path] = 'failed'
+                failed_count += 1
             else:
                 dist = result['distribution']
                 edge_status = f"{dist['edge_count']}/4 edges"
@@ -160,48 +152,112 @@ def check_corners(image_dir, board_width, board_height, extension, left_prefix, 
                 if result['detection_rate'] < 100:
                     status = "INCOMPLETE"
                     symbol = "⚠"
-                    warning_images.append(img_path)
+                    corner_status[img_path] = 'warning'
+                    warning_count += 1
                 elif dist['edge_count'] < 3:
                     status = "POOR DIST"
                     symbol = "⚠"
-                    warning_images.append(img_path)
+                    corner_status[img_path] = 'warning'
+                    warning_count += 1
                 else:
                     status = "GOOD"
                     symbol = "✓"
-                    good_images.append(img_path)
+                    corner_status[img_path] = 'good'
+                    good_count += 1
                 
                 print(f"{symbol} {img_path.name:30s} {result['corners_detected']:3d}/{result['corners_expected']:3d} corners "
                       f"({edge_status}) [{status}]")
         
         print("-" * 80)
-        print(f"Good images:    {len(good_images)}")
-        print(f"Warning images: {len(warning_images)}")
-        print(f"Failed images:  {len(failed_images)}")
-        
-        # Remove failed images (no corners detected or errors)
-        images_to_remove = failed_images
-        if images_to_remove:
-            print(f"\nRemoving {len(images_to_remove)} images with failed corner detection...")
-            for img in images_to_remove:
-                if backup_dir:
-                    backup_path = backup_image(img, backup_dir)
-                    print(f"  Backed up and removed: {img.name} -> {backup_path}")
-                else:
-                    print(f"  Removed: {img.name}")
-                img.unlink()
-        
-        # Keep warning images but notify user
-        if warning_images:
-            print(f"\n⚠ Keeping {len(warning_images)} images with warnings (suboptimal but usable):")
-            for img in warning_images:
-                print(f"  - {img.name}")
-        
-        valid_count = len(good_images) + len(warning_images)
-        results[prefix] = valid_count
-        print(f"\n✓ {prefix} camera: {valid_count} valid images")
+        print(f"Good images:    {good_count}")
+        print(f"Warning images: {warning_count}")
+        print(f"Failed images:  {failed_count}")
     
     print()
-    return results
+    return corner_status
+
+
+def extract_image_number(filename, prefix):
+    """Extract the numeric index from an image filename."""
+    # Remove prefix and extension
+    name_without_ext = filename.stem
+    if name_without_ext.startswith(prefix):
+        number_str = name_without_ext[len(prefix):]
+        try:
+            return int(number_str)
+        except ValueError:
+            return None
+    return None
+
+
+def create_filtered_directory(image_dir, corner_status, extension, left_prefix, right_prefix, output_dir):
+    """
+    Create a new directory with filtered images, renamed sequentially.
+    
+    Returns:
+        Number of valid image pairs copied
+    """
+    image_dir = Path(image_dir)
+    output_dir = Path(output_dir)
+    
+    print("=" * 80)
+    print("STEP 3: CREATE FILTERED IMAGE DIRECTORY")
+    print("=" * 80)
+    print(f"Output directory: {output_dir}")
+    
+    # Create output directory
+    if output_dir.exists():
+        print(f"Removing existing filtered directory...")
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Collect good and warning images (both are usable)
+    left_images = {}
+    right_images = {}
+    
+    for img_path, status in corner_status.items():
+        if status in ['good', 'warning']:
+            if img_path.name.startswith(left_prefix):
+                img_num = extract_image_number(img_path, left_prefix)
+                if img_num is not None:
+                    left_images[img_num] = img_path
+            elif img_path.name.startswith(right_prefix):
+                img_num = extract_image_number(img_path, right_prefix)
+                if img_num is not None:
+                    right_images[img_num] = img_path
+    
+    # Find matching pairs (images with same index in both left and right)
+    left_indices = set(left_images.keys())
+    right_indices = set(right_images.keys())
+    common_indices = sorted(left_indices & right_indices)
+    
+    if not common_indices:
+        print("✗ ERROR: No matching image pairs found")
+        return 0
+    
+    print(f"\nFound {len(common_indices)} valid image pairs")
+    print(f"Copying and renaming images...")
+    print("-" * 80)
+    
+    # Copy images with sequential naming
+    for new_idx, orig_idx in enumerate(common_indices, start=1):
+        left_src = left_images[orig_idx]
+        right_src = right_images[orig_idx]
+        
+        left_dst = output_dir / f"{left_prefix}{new_idx}.{extension}"
+        right_dst = output_dir / f"{right_prefix}{new_idx}.{extension}"
+        
+        shutil.copy2(left_src, left_dst)
+        shutil.copy2(right_src, right_dst)
+        
+        print(f"  {left_src.name:30s} -> {left_dst.name:30s}")
+        print(f"  {right_src.name:30s} -> {right_dst.name:30s}")
+    
+    print("-" * 80)
+    print(f"✓ Copied {len(common_indices)} image pairs to {output_dir}")
+    print()
+    
+    return len(common_indices)
 
 
 def main():
@@ -225,8 +281,8 @@ def main():
                         help='Left camera image prefix (default: left)')
     parser.add_argument('--right-prefix', type=str, default='right',
                         help='Right camera image prefix (default: right)')
-    parser.add_argument('--no-backup', action='store_true',
-                        help='Do not create backup of removed images')
+    parser.add_argument('--output-dir', type=str, default=None,
+                        help='Output directory for filtered images (default: <image_dir>_filtered)')
     
     args = parser.parse_args()
     
@@ -235,24 +291,34 @@ def main():
         print(f"Error: Directory {image_dir} does not exist")
         return 1
     
-    # Create backup directory
-    backup_dir = None
-    if not args.no_backup:
-        backup_dir = image_dir / ".removed_images_backup"
-        backup_dir.mkdir(exist_ok=True)
-        print(f"Backup directory: {backup_dir}\n")
+    # Determine output directory
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        # Default: create a _filtered directory next to the original
+        output_dir = Path(str(image_dir).rstrip('/') + '_filtered')
+    
+    print(f"Input directory:  {image_dir}")
+    print(f"Output directory: {output_dir}")
+    print()
     
     # Step 1: Check for blur
-    sharp_images = check_blur(image_dir, args.blur_threshold, args.extension, backup_dir)
+    blur_status = check_blur(image_dir, args.blur_threshold, args.extension)
     
-    if not sharp_images:
+    if not any(blur_status.values()):
         print("Error: No images passed blur check")
         return 1
     
     # Step 2: Check corner detection quality
-    valid_counts = check_corners(
+    corner_status = check_corners(
         image_dir, args.width, args.height, args.extension,
-        args.left_prefix, args.right_prefix, backup_dir
+        args.left_prefix, args.right_prefix, blur_status
+    )
+    
+    # Step 3: Create filtered directory with renamed images
+    num_pairs = create_filtered_directory(
+        image_dir, corner_status, args.extension,
+        args.left_prefix, args.right_prefix, output_dir
     )
     
     # Final summary
@@ -260,34 +326,29 @@ def main():
     print("FINAL SUMMARY")
     print("=" * 80)
     
-    left_count = valid_counts.get(args.left_prefix, 0)
-    right_count = valid_counts.get(args.right_prefix, 0)
-    
-    print(f"Valid {args.left_prefix} camera images:  {left_count}")
-    print(f"Valid {args.right_prefix} camera images: {right_count}")
-    
-    # Determine minimum count for stereo calibration
-    min_count = min(left_count, right_count) if left_count > 0 and right_count > 0 else 0
-    
-    if min_count == 0:
+    if num_pairs == 0:
         print("\n✗ ERROR: No valid image pairs available for calibration")
         return 1
-    elif min_count < 20:
-        print(f"\n⚠ WARNING: Only {min_count} valid image pairs - recommend at least 30 for best results")
+    elif num_pairs < 20:
+        print(f"\n⚠ WARNING: Only {num_pairs} valid image pairs - recommend at least 30 for best results")
     else:
-        print(f"\n✓ SUCCESS: {min_count} valid image pairs ready for calibration")
+        print(f"\n✓ SUCCESS: {num_pairs} valid image pairs ready for calibration")
+    
+    print(f"\nFiltered images saved to: {output_dir}")
+    print(f"Number of valid pairs: {num_pairs}")
     
     print(f"\nRecommended calibration command:")
-    print(f"  ./calibrate -w {args.width} -h {args.height} -n {min_count} "
-          f"-d {args.image_dir}/ -l {args.left_prefix} -r {args.right_prefix} "
+    print(f"  ./calibrate -w {args.width} -h {args.height} -n {num_pairs} "
+          f"-d {output_dir}/ -l {args.left_prefix} -r {args.right_prefix} "
           f"-e {args.extension} -o output.yml")
     
-    # Write the count to a file for the entrypoint script to read
-    count_file = image_dir / ".valid_image_count"
-    with open(count_file, 'w') as f:
-        f.write(str(min_count))
+    # Write the filtered directory path and count for the entrypoint script to read
+    info_file = image_dir / ".filtered_info"
+    with open(info_file, 'w') as f:
+        f.write(f"{output_dir}\n")
+        f.write(f"{num_pairs}\n")
     
-    print(f"\nValid image count written to: {count_file}")
+    print(f"\nFiltered directory info written to: {info_file}")
     print("=" * 80)
     
     return 0
