@@ -89,8 +89,8 @@ void load_image_points_with_precorrection(int board_width, int board_height, flo
     
     for (int i : common_indices) {
         char left_img[100], right_img[100];
-        sprintf(left_img, "%s%s%d.%s", img_dir, leftimg_filename, i, extension);
-        sprintf(right_img, "%s%s%d.%s", img_dir, rightimg_filename, i, extension);
+        sprintf(left_img, "%s/%s%d.%s", img_dir, leftimg_filename, i, extension);
+        sprintf(right_img, "%s/%s%d.%s", img_dir, rightimg_filename, i, extension);
         
         img1 = imread(left_img, IMREAD_COLOR);
         img2 = imread(right_img, IMREAD_COLOR);
@@ -268,8 +268,8 @@ int main(int argc, char const *argv[])
     
     for (int i : common_indices) {
         char left_img[100], right_img[100];
-        sprintf(left_img, "%s%s%d.%s", img_dir, leftimg_filename, i, extension);
-        sprintf(right_img, "%s%s%d.%s", img_dir, rightimg_filename, i, extension);
+        sprintf(left_img, "%s/%s%d.%s", img_dir, leftimg_filename, i, extension);
+        sprintf(right_img, "%s/%s%d.%s", img_dir, rightimg_filename, i, extension);
         
         img1 = imread(left_img, IMREAD_COLOR);
         img2 = imread(right_img, IMREAD_COLOR);
