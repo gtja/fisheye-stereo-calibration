@@ -425,12 +425,34 @@ int main(int argc, char const *argv[])
     Mat xi1_mat = (Mat_<double>(1,1) << xi1);
     Mat xi2_mat = (Mat_<double>(1,1) << xi2);
     
-    cv::omnidir::calibrate(object_points, left_img_points, img1.size(), 
+    // Convert Point2d to Point2f and Point3d to Point3f for compatibility with omnidir
+    vector<vector<Point2f>> left_img_points_f, right_img_points_f;
+    vector<vector<Point3f>> object_points_f;
+    
+    for (size_t i = 0; i < object_points.size(); i++) {
+      vector<Point3f> obj_f;
+      for (size_t j = 0; j < object_points[i].size(); j++) {
+        obj_f.push_back(Point3f((float)object_points[i][j].x, (float)object_points[i][j].y, (float)object_points[i][j].z));
+      }
+      object_points_f.push_back(obj_f);
+    }
+    
+    for (size_t i = 0; i < left_img_points.size(); i++) {
+      vector<Point2f> v1, v2;
+      for (size_t j = 0; j < left_img_points[i].size(); j++) {
+        v1.push_back(Point2f((float)left_img_points[i][j].x, (float)left_img_points[i][j].y));
+        v2.push_back(Point2f((float)right_img_points[i][j].x, (float)right_img_points[i][j].y));
+      }
+      left_img_points_f.push_back(v1);
+      right_img_points_f.push_back(v2);
+    }
+    
+    cv::omnidir::calibrate(object_points_f, left_img_points_f, img1.size(), 
                            K1_mat, xi1_mat, D1_mat, rvecs_left, tvecs_left, 
                            cv::omnidir::CALIB_USE_GUESS | cv::omnidir::CALIB_FIX_SKEW,
                            cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 200, 1e-6));
     
-    cv::omnidir::calibrate(object_points, right_img_points, img2.size(), 
+    cv::omnidir::calibrate(object_points_f, right_img_points_f, img2.size(), 
                            K2_mat, xi2_mat, D2_mat, rvecs_right, tvecs_right,
                            cv::omnidir::CALIB_USE_GUESS | cv::omnidir::CALIB_FIX_SKEW,
                            cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 200, 1e-6));
