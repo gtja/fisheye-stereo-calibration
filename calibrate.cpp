@@ -1,5 +1,6 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/calib3d/calib3d.hpp>
+#include <opencv2/ccalib/omnidir.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <stdio.h>
@@ -167,6 +168,7 @@ int main(int argc, char const *argv[])
   char* rightimg_filename;
   char* out_file;
   char* extension = (char*)"jpg"; // Default to jpg for backward compatibility
+  char* model = (char*)"fisheye"; // Default to fisheye model for backward compatibility
 
   static struct poptOption options[] = {
     { "board_width",'w',POPT_ARG_INT,&board_width,0,"Checkerboard width","NUM" },
@@ -179,6 +181,7 @@ int main(int argc, char const *argv[])
     { "out_file",'o',POPT_ARG_STRING,&out_file,0,"Output calibration filename (YML)","STR" },
     { "extension",'e',POPT_ARG_STRING,&extension,0,"Image file extension (default: jpg)","STR" },
     { "physical_baseline",'b',POPT_ARG_FLOAT,&physical_baseline,0,"Physical baseline distance in meters (optional)","NUM" },
+    { "model",'m',POPT_ARG_STRING,&model,0,"Camera model: 'fisheye' (default) or 'omnidir' for MEI model (>200° FOV)","STR" },
     POPT_AUTOHELP
     { NULL, 0, 0, NULL, 0, NULL, NULL }
   };
@@ -219,38 +222,149 @@ int main(int argc, char const *argv[])
   }
   
   printf("Successfully loaded %zu valid image pairs for calibration\n", object_points.size());
+  
+  // Determine which camera model to use
+  std::string model_str(model);
+  bool use_omnidir = (model_str == "omnidir" || model_str == "mei" || model_str == "MEI");
+  
+  if (use_omnidir) {
+    printf("Using omnidirectional (MEI) camera model for wide FOV (>200°)\n");
+  } else {
+    printf("Using fisheye camera model\n");
+  }
+  
   printf("Starting Calibration\n");
   cv::Matx33d K1, K2, R;
   cv::Vec3d T;
   cv::Vec4d D1, D2;
-  int flag = 0;
-  flag |= cv::fisheye::CALIB_RECOMPUTE_EXTRINSIC;
-  // Disable CHECK_COND for more robust calibration - can be too strict with challenging datasets
-  //flag |= cv::fisheye::CALIB_CHECK_COND;
-  flag |= cv::fisheye::CALIB_FIX_SKEW;
-  // IMPORTANT: All 4 distortion coefficients (k1-k4) are enabled by default for fisheye
-  // Do NOT fix K2, K3, K4 - they are essential for handling extreme edge distortion in fisheye lenses
-  //flag |= cv::fisheye::CALIB_FIX_K2;
-  //flag |= cv::fisheye::CALIB_FIX_K3;
-  //flag |= cv::fisheye::CALIB_FIX_K4;
-  // Principal point is optimized by default (not fixed to image center)
-  // This is important for wide-angle lenses where the optical center may not be at image center
-  //flag |= cv::fisheye::CALIB_FIX_PRINCIPAL_POINT;
+  double xi1 = 0.0, xi2 = 0.0; // Mirror parameters for MEI model
   
-  // Use more iterations for better accuracy (increased from 12 to 30)
-  // Use moderate convergence epsilon (1e-5) - too strict can cause numerical issues
-  cv::fisheye::stereoCalibrate(object_points, left_img_points, right_img_points,
-      K1, D1, K2, D2, img1.size(), R, T, flag,
-      cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 1e-5));
+  if (use_omnidir) {
+    // Omnidirectional camera calibration (MEI model)
+    // This model is suitable for extreme wide-angle lenses (FOV > 200°)
+    printf("Initializing omnidir calibration...\n");
+    
+    // Convert Point2d to Point2f and Point3d to Point3f for compatibility with omnidir
+    // Both need to be either 32-bit or 64-bit consistently
+    vector<vector<Point2f>> left_img_points_f, right_img_points_f;
+    vector<vector<Point3f>> object_points_f;
+    
+    for (size_t i = 0; i < object_points.size(); i++) {
+      vector<Point3f> obj_f;
+      for (size_t j = 0; j < object_points[i].size(); j++) {
+        obj_f.push_back(Point3f((float)object_points[i][j].x, (float)object_points[i][j].y, (float)object_points[i][j].z));
+      }
+      object_points_f.push_back(obj_f);
+    }
+    
+    for (size_t i = 0; i < left_img_points.size(); i++) {
+      vector<Point2f> v1, v2;
+      for (size_t j = 0; j < left_img_points[i].size(); j++) {
+        v1.push_back(Point2f((float)left_img_points[i][j].x, (float)left_img_points[i][j].y));
+        v2.push_back(Point2f((float)right_img_points[i][j].x, (float)right_img_points[i][j].y));
+      }
+      left_img_points_f.push_back(v1);
+      right_img_points_f.push_back(v2);
+    }
+    
+    Mat K1_mat, K2_mat, D1_mat, D2_mat, xi1_mat, xi2_mat, R_mat, T_mat;
+    vector<Vec3d> rvecs_left, tvecs_left, rvecs_right, tvecs_right;
+    
+    int flags = 0;
+    flags |= cv::omnidir::CALIB_FIX_SKEW;
+    // Allow all distortion coefficients and principal point optimization
+    // Similar to fisheye model, these are essential for extreme wide-angle lenses
+    
+    // Calibrate left camera first to get initial intrinsics
+    printf("Calibrating left camera with omnidir model...\n");
+    printf("Image size: %dx%d\n", img1.size().width, img1.size().height);
+    printf("Number of images: %zu\n", object_points_f.size());
+    printf("Number of points per image: %zu\n", object_points_f[0].size());
+    
+    double rms_left = cv::omnidir::calibrate(object_points_f, left_img_points_f, img1.size(),
+                                             K1_mat, xi1_mat, D1_mat, rvecs_left, tvecs_left,
+                                             flags,
+                                             cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 200, 1e-6));
+    printf("Left camera RMS error: %.4f\n", rms_left);
+    
+    // Calibrate right camera to get initial intrinsics
+    printf("Calibrating right camera with omnidir model...\n");
+    double rms_right = cv::omnidir::calibrate(object_points_f, right_img_points_f, img2.size(),
+                                              K2_mat, xi2_mat, D2_mat, rvecs_right, tvecs_right,
+                                              flags,
+                                              cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 200, 1e-6));
+    printf("Right camera RMS error: %.4f\n", rms_right);
+    
+    // Stereo calibration with omnidir model
+    printf("Performing stereo calibration with omnidir model...\n");
+    Mat rvec_stereo, tvec_stereo;
+    double rms_stereo = cv::omnidir::stereoCalibrate(object_points_f, left_img_points_f, right_img_points_f,
+                                                     img1.size(), img2.size(),
+                                                     K1_mat, xi1_mat, D1_mat,
+                                                     K2_mat, xi2_mat, D2_mat,
+                                                     rvec_stereo, tvec_stereo, rvecs_left, tvecs_left,
+                                                     flags | cv::omnidir::CALIB_USE_GUESS,
+                                                     cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 200, 1e-6));
+    printf("Stereo calibration RMS error: %.4f\n", rms_stereo);
+    
+    // Convert rotation vector to rotation matrix
+    cv::Rodrigues(rvec_stereo, R_mat);
+    
+    // Convert results to standard format - need to handle size differences properly
+    K1 = Matx33d((double*)K1_mat.data);
+    K2 = Matx33d((double*)K2_mat.data);
+    // For omnidir, D can have 4 or more coefficients, extract first 4
+    D1 = Vec4d(D1_mat.at<double>(0), D1_mat.at<double>(1), D1_mat.at<double>(2), D1_mat.at<double>(3));
+    D2 = Vec4d(D2_mat.at<double>(0), D2_mat.at<double>(1), D2_mat.at<double>(2), D2_mat.at<double>(3));
+    R = Matx33d((double*)R_mat.data);
+    T = Vec3d(tvec_stereo.at<double>(0), tvec_stereo.at<double>(1), tvec_stereo.at<double>(2));
+    xi1 = xi1_mat.at<double>(0);
+    xi2 = xi2_mat.at<double>(0);
+    
+    cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
+    fs1 << "model_type" << "omnidir";
+    fs1 << "K1" << K1_mat;
+    fs1 << "K2" << K2_mat;
+    fs1 << "D1" << D1_mat;
+    fs1 << "D2" << D2_mat;
+    fs1 << "xi1" << xi1;
+    fs1 << "xi2" << xi2;
+    fs1 << "R" << R_mat;
+    fs1 << "T" << T_mat;
+    printf("Done Calibration\n");
+    printf("Mirror parameters: xi1=%.6f, xi2=%.6f\n", xi1, xi2);
+  } else {
+    // Standard fisheye calibration
+    int flag = 0;
+    flag |= cv::fisheye::CALIB_RECOMPUTE_EXTRINSIC;
+    // Disable CHECK_COND for more robust calibration - can be too strict with challenging datasets
+    //flag |= cv::fisheye::CALIB_CHECK_COND;
+    flag |= cv::fisheye::CALIB_FIX_SKEW;
+    // IMPORTANT: All 4 distortion coefficients (k1-k4) are enabled by default for fisheye
+    // Do NOT fix K2, K3, K4 - they are essential for handling extreme edge distortion in fisheye lenses
+    //flag |= cv::fisheye::CALIB_FIX_K2;
+    //flag |= cv::fisheye::CALIB_FIX_K3;
+    //flag |= cv::fisheye::CALIB_FIX_K4;
+    // Principal point is optimized by default (not fixed to image center)
+    // This is important for wide-angle lenses where the optical center may not be at image center
+    //flag |= cv::fisheye::CALIB_FIX_PRINCIPAL_POINT;
+    
+    // Use more iterations for better accuracy (increased from 12 to 30)
+    // Use moderate convergence epsilon (1e-5) - too strict can cause numerical issues
+    cv::fisheye::stereoCalibrate(object_points, left_img_points, right_img_points,
+        K1, D1, K2, D2, img1.size(), R, T, flag,
+        cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 1e-5));
 
-  cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
-  fs1 << "K1" << Mat(K1);
-  fs1 << "K2" << Mat(K2);
-  fs1 << "D1" << D1;
-  fs1 << "D2" << D2;
-  fs1 << "R" << Mat(R);
-  fs1 << "T" << T;
-  printf("Done Calibration\n");
+    cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
+    fs1 << "model_type" << "fisheye";
+    fs1 << "K1" << Mat(K1);
+    fs1 << "K2" << Mat(K2);
+    fs1 << "D1" << D1;
+    fs1 << "D2" << D2;
+    fs1 << "R" << Mat(R);
+    fs1 << "T" << T;
+    printf("Done Calibration\n");
+  }
 
   printf("Starting Rectification\n");
 
@@ -260,14 +374,41 @@ int main(int argc, char const *argv[])
   // alpha=1: all original pixels retained but more invalid regions
   // Disable CALIB_ZERO_DISPARITY flag (set to 0) - can improve rectification accuracy in some cases
   double alpha = 0.8;
-  cv::fisheye::stereoRectify(K1, D1, K2, D2, img1.size(), R, T, R1, R2, P1, P2, 
-Q, 0, img1.size(), alpha, 1.1);
-
-  fs1 << "R1" << R1;
-  fs1 << "R2" << R2;
-  fs1 << "P1" << P1;
-  fs1 << "P2" << P2;
-  fs1 << "Q" << Q;
+  
+  if (use_omnidir) {
+    // Omnidir rectification - simplified version
+    // The omnidir::stereoRectify only computes R1 and R2
+    cv::omnidir::stereoRectify(Mat(R), Mat(T), R1, R2);
+    
+    // For omnidir, we use the original camera matrices as projection matrices
+    // since the rectification is handled differently
+    P1 = Mat(K1);
+    P2 = Mat(K2);
+    // Q matrix is not directly supported by omnidir rectification
+    Q = Mat::eye(4, 4, CV_64F);
+    
+    // Reopen file storage to append rectification results
+    cv::FileStorage fs1(out_file, cv::FileStorage::APPEND);
+    fs1 << "R1" << R1;
+    fs1 << "R2" << R2;
+    fs1 << "P1" << P1;
+    fs1 << "P2" << P2;
+    fs1 << "Q" << Q;
+    fs1.release();
+  } else {
+    // Fisheye rectification
+    cv::fisheye::stereoRectify(K1, D1, K2, D2, img1.size(), R, T, R1, R2, P1, P2, 
+  Q, 0, img1.size(), alpha, 1.1);
+    
+    // Reopen file storage to append rectification results
+    cv::FileStorage fs1(out_file, cv::FileStorage::APPEND);
+    fs1 << "R1" << R1;
+    fs1 << "R2" << R2;
+    fs1 << "P1" << P1;
+    fs1 << "P2" << P2;
+    fs1 << "Q" << Q;
+    fs1.release();
+  }
 
   printf("Done Rectification\n");
 
@@ -278,15 +419,31 @@ Q, 0, img1.size(), alpha, 1.1);
   // Re-calibrate individual cameras to get per-image extrinsics
   vector<cv::Vec3d> rvecs_left, tvecs_left, rvecs_right, tvecs_right;
   
-  // Calibrate left camera to get extrinsics
-  cv::fisheye::calibrate(object_points, left_img_points, img1.size(), 
-                         K1, D1, rvecs_left, tvecs_left, 
-                         cv::fisheye::CALIB_USE_INTRINSIC_GUESS);
-  
-  // Calibrate right camera to get extrinsics
-  cv::fisheye::calibrate(object_points, right_img_points, img2.size(), 
-                         K2, D2, rvecs_right, tvecs_right,
-                         cv::fisheye::CALIB_USE_INTRINSIC_GUESS);
+  if (use_omnidir) {
+    // For omnidir model, get extrinsics using omnidir calibrate
+    Mat K1_mat(K1), K2_mat(K2), D1_mat(D1), D2_mat(D2);
+    Mat xi1_mat = (Mat_<double>(1,1) << xi1);
+    Mat xi2_mat = (Mat_<double>(1,1) << xi2);
+    
+    cv::omnidir::calibrate(object_points, left_img_points, img1.size(), 
+                           K1_mat, xi1_mat, D1_mat, rvecs_left, tvecs_left, 
+                           cv::omnidir::CALIB_USE_GUESS | cv::omnidir::CALIB_FIX_SKEW,
+                           cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 200, 1e-6));
+    
+    cv::omnidir::calibrate(object_points, right_img_points, img2.size(), 
+                           K2_mat, xi2_mat, D2_mat, rvecs_right, tvecs_right,
+                           cv::omnidir::CALIB_USE_GUESS | cv::omnidir::CALIB_FIX_SKEW,
+                           cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 200, 1e-6));
+  } else {
+    // For fisheye model, use fisheye calibrate
+    cv::fisheye::calibrate(object_points, left_img_points, img1.size(), 
+                           K1, D1, rvecs_left, tvecs_left, 
+                           cv::fisheye::CALIB_USE_INTRINSIC_GUESS);
+    
+    cv::fisheye::calibrate(object_points, right_img_points, img2.size(), 
+                           K2, D2, rvecs_right, tvecs_right,
+                           cv::fisheye::CALIB_USE_INTRINSIC_GUESS);
+  }
   
   // 1. Monocular Reprojection Error
   double total_err_left = 0.0, total_err_right = 0.0;
@@ -295,7 +452,13 @@ Q, 0, img1.size(), alpha, 1.1);
   for (size_t i = 0; i < object_points.size(); i++) {
     // Project object points to left camera with its extrinsics
     vector<Point2d> projected_left;
-    cv::fisheye::projectPoints(object_points[i], projected_left, rvecs_left[i], tvecs_left[i], K1, D1);
+    if (use_omnidir) {
+      Mat K1_mat(K1), D1_mat(D1);
+      cv::omnidir::projectPoints(object_points[i], projected_left, rvecs_left[i], tvecs_left[i], 
+                                 K1_mat, xi1, D1_mat);
+    } else {
+      cv::fisheye::projectPoints(object_points[i], projected_left, rvecs_left[i], tvecs_left[i], K1, D1);
+    }
     
     // Calculate error for left camera
     for (size_t j = 0; j < projected_left.size(); j++) {
@@ -306,7 +469,13 @@ Q, 0, img1.size(), alpha, 1.1);
     
     // Project object points to right camera with its extrinsics
     vector<Point2d> projected_right;
-    cv::fisheye::projectPoints(object_points[i], projected_right, rvecs_right[i], tvecs_right[i], K2, D2);
+    if (use_omnidir) {
+      Mat K2_mat(K2), D2_mat(D2);
+      cv::omnidir::projectPoints(object_points[i], projected_right, rvecs_right[i], tvecs_right[i], 
+                                 K2_mat, xi2, D2_mat);
+    } else {
+      cv::fisheye::projectPoints(object_points[i], projected_right, rvecs_right[i], tvecs_right[i], K2, D2);
+    }
     
     // Calculate error for right camera
     for (size_t j = 0; j < projected_right.size(); j++) {
@@ -364,7 +533,13 @@ Q, 0, img1.size(), alpha, 1.1);
     
     // Project transformed points to right camera (with zero extrinsics since points are already in right camera frame)
     vector<Point2d> projected_right;
-    cv::fisheye::projectPoints(transformed_points, projected_right, cv::Vec3d(0,0,0), cv::Vec3d(0,0,0), K2, D2);
+    if (use_omnidir) {
+      Mat K2_mat(K2), D2_mat(D2);
+      cv::omnidir::projectPoints(transformed_points, projected_right, cv::Vec3d(0,0,0), cv::Vec3d(0,0,0), 
+                                 K2_mat, xi2, D2_mat);
+    } else {
+      cv::fisheye::projectPoints(transformed_points, projected_right, cv::Vec3d(0,0,0), cv::Vec3d(0,0,0), K2, D2);
+    }
     
     // Calculate stereo reprojection error
     for (size_t j = 0; j < projected_right.size(); j++) {
@@ -396,8 +571,14 @@ Q, 0, img1.size(), alpha, 1.1);
   
   // Compute rectification maps
   cv::Mat map1x, map1y, map2x, map2y;
-  cv::fisheye::initUndistortRectifyMap(K1, D1, R1, P1, img1.size(), CV_32FC1, map1x, map1y);
-  cv::fisheye::initUndistortRectifyMap(K2, D2, R2, P2, img2.size(), CV_32FC1, map2x, map2y);
+  if (use_omnidir) {
+    Mat K1_mat(K1), D1_mat(D1), K2_mat(K2), D2_mat(D2);
+    cv::omnidir::initUndistortRectifyMap(K1_mat, D1_mat, xi1, R1, P1, img1.size(), CV_32FC1, map1x, map1y, cv::omnidir::RECTIFY_LONGLATI);
+    cv::omnidir::initUndistortRectifyMap(K2_mat, D2_mat, xi2, R2, P2, img2.size(), CV_32FC1, map2x, map2y, cv::omnidir::RECTIFY_LONGLATI);
+  } else {
+    cv::fisheye::initUndistortRectifyMap(K1, D1, R1, P1, img1.size(), CV_32FC1, map1x, map1y);
+    cv::fisheye::initUndistortRectifyMap(K2, D2, R2, P2, img2.size(), CV_32FC1, map2x, map2y);
+  }
   
   // Check rectification error for detected corners
   for (size_t i = 0; i < left_img_points.size(); i++) {
@@ -449,18 +630,20 @@ Q, 0, img1.size(), alpha, 1.1);
   }
   
   // Write evaluation metrics to output file
-  fs1 << "monocular_reprojection_error_left" << avg_err_left;
-  fs1 << "monocular_reprojection_error_right" << avg_err_right;
-  fs1 << "monocular_reprojection_error_avg" << avg_monocular_err;
-  fs1 << "stereo_reprojection_error_avg" << avg_stereo_err;
-  fs1 << "stereo_reprojection_error_max" << max_stereo_err;
-  fs1 << "stereo_rectification_error_avg" << avg_rectify_err;
-  fs1 << "stereo_rectification_error_max" << max_rectify_err;
-  fs1 << "calibrated_baseline" << calibrated_baseline;
+  cv::FileStorage fs_eval(out_file, cv::FileStorage::APPEND);
+  fs_eval << "monocular_reprojection_error_left" << avg_err_left;
+  fs_eval << "monocular_reprojection_error_right" << avg_err_right;
+  fs_eval << "monocular_reprojection_error_avg" << avg_monocular_err;
+  fs_eval << "stereo_reprojection_error_avg" << avg_stereo_err;
+  fs_eval << "stereo_reprojection_error_max" << max_stereo_err;
+  fs_eval << "stereo_rectification_error_avg" << avg_rectify_err;
+  fs_eval << "stereo_rectification_error_max" << max_rectify_err;
+  fs_eval << "calibrated_baseline" << calibrated_baseline;
   if (physical_baseline > 0) {
-    fs1 << "physical_baseline" << physical_baseline;
-    fs1 << "baseline_error" << fabs(calibrated_baseline - physical_baseline);
+    fs_eval << "physical_baseline" << physical_baseline;
+    fs_eval << "baseline_error" << fabs(calibrated_baseline - physical_baseline);
   }
+  fs_eval.release();
   
   printf("\n====================================================\n");
   printf("Evaluation metrics saved to: %s\n", out_file);
