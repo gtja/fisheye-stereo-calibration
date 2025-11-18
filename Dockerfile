@@ -3,7 +3,7 @@ FROM ubuntu:18.04
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install dependencies for building OpenCV 3.4
+# Install dependencies for building OpenCV 3.4 and Python utilities
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     libpopt-dev \
+    # Python dependencies for utility scripts
+    python3 \
+    python3-pip \
     # OpenCV dependencies
     libgtk2.0-dev \
     pkg-config \
@@ -44,6 +47,9 @@ RUN cd /tmp && \
     ldconfig && \
     cd / && \
     rm -rf /tmp/opencv*
+
+# Install Python packages for utility scripts
+RUN pip3 install --no-cache-dir opencv-python numpy
 
 # Set working directory
 WORKDIR /app
