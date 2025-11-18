@@ -517,17 +517,58 @@ int main(int argc, char const *argv[])
     // Configure solver
     ceres::Solver::Options solver_options;
     solver_options.linear_solver_type = ceres::SPARSE_SCHUR;
-    solver_options.minimizer_progress_to_stdout = true;
+    // Disable progress to stdout to avoid potential string construction issues
+    // Progress will be shown through iteration callbacks instead
+    solver_options.minimizer_progress_to_stdout = false;
     solver_options.max_num_iterations = 100;
     solver_options.function_tolerance = 1e-6;
+    solver_options.num_threads = 1;  // Use single thread to avoid race conditions
+    
+    // Custom iteration callback for safe progress reporting
+    class SafeIterationCallback : public ceres::IterationCallback {
+    public:
+        ceres::CallbackReturnType operator()(const ceres::IterationSummary& summary) override {
+            try {
+                printf("Iteration %4d: cost = %e\n", summary.iteration, summary.cost);
+            } catch (...) {
+                // Silently ignore any errors in progress reporting
+            }
+            return ceres::SOLVER_CONTINUE;
+        }
+    };
+    
+    SafeIterationCallback callback;
+    solver_options.callbacks.push_back(&callback);
+    solver_options.update_state_every_iteration = true;
     
     std::cout << "[LOG] Starting Ceres optimization..." << std::endl;
     ceres::Solver::Summary summary;
-    ceres::Solve(solver_options, &problem, &summary);
     
-    std::string brief_report = summary.BriefReport();
-    printf("\n%s\n", brief_report.c_str());
-    printf("Final RMSE: %.6f pixels\n", sqrt(summary.final_cost / summary.num_residuals));
+    try {
+        ceres::Solve(solver_options, &problem, &summary);
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] Ceres optimization failed: " << e.what() << std::endl;
+        // Cleanup and exit
+        for (auto* ptr : camera_extrinsics_left) delete[] ptr;
+        for (auto* ptr : camera_extrinsics_right) delete[] ptr;
+        return 1;
+    }
+    
+    // Safely get the report
+    std::string brief_report;
+    try {
+        brief_report = summary.BriefReport();
+        if (!brief_report.empty()) {
+            printf("\n%s\n", brief_report.c_str());
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[WARNING] Could not generate brief report: " << e.what() << std::endl;
+        printf("\nOptimization completed with status: %d\n", static_cast<int>(summary.termination_type));
+    }
+    
+    if (summary.num_residuals > 0) {
+        printf("Final RMSE: %.6f pixels\n", sqrt(summary.final_cost / summary.num_residuals));
+    }
     
     // Extract optimized parameters
     ds_left.fx = camera_intrinsics_left[0];
