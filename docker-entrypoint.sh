@@ -58,11 +58,22 @@ if [ $# -gt 0 ]; then
     # Check if quality checks should be run
     if [ "$RUN_QUALITY_CHECKS" = "true" ]; then
         # Parse arguments to extract necessary parameters for quality checks
+        args=("$@")
+        for i in "${!args[@]}"; do
+            case "${args[$i]}" in
+                -w) BOARD_WIDTH="${args[$((i+1))]}" ;;
+                -h) BOARD_HEIGHT="${args[$((i+1))]}" ;;
+                -d) IMG_DIR="${args[$((i+1))]}" ;;
+                -l) LEFT_PREFIX="${args[$((i+1))]}" ;;
+                -r) RIGHT_PREFIX="${args[$((i+1))]}" ;;
+                -e) IMAGE_EXTENSION="${args[$((i+1))]}" ;;
+            esac
+        done
+        
         # Run quality checks before calibration
         run_quality_checks
         
         # If -n parameter was provided, override with validated count
-        args=("$@")
         for i in "${!args[@]}"; do
             if [ "${args[$i]}" = "-n" ]; then
                 args[$((i+1))]="$NUM_IMGS"
