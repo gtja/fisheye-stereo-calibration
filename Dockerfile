@@ -59,6 +59,9 @@ WORKDIR /app
 # Copy the source code
 COPY . /app/
 
+# Make Python utility scripts executable
+RUN chmod +x /app/utils/*.py
+
 # Build the calibration executable
 RUN mkdir -p build && \
     cd build && \
