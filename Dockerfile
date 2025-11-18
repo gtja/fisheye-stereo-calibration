@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-# Install dependencies for building OpenCV 4.7 and Python utilities
+# Install dependencies for building OpenCV 4.7, Ceres, and Python utilities
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
@@ -31,6 +31,12 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libtiff-dev \
     libdc1394-22-dev \
+    # Ceres Solver dependencies for Double-Sphere calibration
+    libeigen3-dev \
+    libgoogle-glog-dev \
+    libgflags-dev \
+    libatlas-base-dev \
+    libsuitesparse-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and build OpenCV 4.7.0 with contrib modules
@@ -58,6 +64,20 @@ RUN cd /tmp && \
     ldconfig && \
     cd / && \
     rm -rf /tmp/opencv*
+
+# Download and build Ceres Solver 2.1.0 for Double-Sphere calibration
+RUN cd /tmp && \
+    wget --no-check-certificate -O ceres.tar.gz http://ceres-solver.org/ceres-solver-2.1.0.tar.gz && \
+    tar xzf ceres.tar.gz && \
+    cd ceres-solver-2.1.0 && \
+    mkdir build && \
+    cd build && \
+    cmake .. && \
+    make -j2 && \
+    make install && \
+    ldconfig && \
+    cd / && \
+    rm -rf /tmp/ceres*
 
 # Set working directory
 WORKDIR /app

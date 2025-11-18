@@ -77,6 +77,29 @@ docker run \
   -w 9 -h 6 -s 0.02423 -n 29 -d /data/imgs/ -l left -r right -o /data/output/cam_stereo.yml
 ```
 
+### 🆕 Double-Sphere Calibration (High Precision)
+
+For applications requiring sub-pixel accuracy (<0.15 pixels RMSE), use the Double-Sphere model with 6-order radial distortion and Ceres Bundle Adjustment:
+
+```bash
+docker run \
+  -v /path/to/your/imgs:/data/imgs \
+  -v /path/to/output:/data/output \
+  -e CALIBRATION_MODEL=double_sphere \
+  fisheye-stereo-calibration \
+  -w 9 -h 6 -s 0.02423 -d /data/imgs/ -l left -r right -o /data/output/cam_stereo_ds.yml
+```
+
+**Key features:**
+- 6-order radial distortion (k1-k6) for better edge modeling
+- SE(3) pre-correction for improved corner detection
+- Ceres-based Bundle Adjustment with Huber robust kernel
+- Typically achieves 0.1-0.15 pixels RMSE (vs 0.3 pixels with standard methods)
+
+**Note:** The `-n` (number of images) parameter is not needed for Double-Sphere calibration as it automatically detects all valid image pairs.
+
+For more details, see [DOUBLE_SPHERE_CALIBRATION.md](DOUBLE_SPHERE_CALIBRATION.md).
+
 ### Manual Workflow (Advanced Users)
 
 If you prefer to run quality checks manually or need more control:
