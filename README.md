@@ -79,7 +79,8 @@ The calibration program automatically evaluates the accuracy of the calibration 
    - Target threshold: < 1.5 pixels
 
 4. **Stereo Rectification Error**: The average y-coordinate difference for corresponding points after rectification
-   - Target threshold: < 0.3 pixels
+   - Target threshold: < 0.3 pixels (average)
+   - Target threshold: < 0.7 pixels (maximum)
 
 5. **Baseline Distance**: Comparison between the calibrated baseline and physical baseline (if provided)
    - Target threshold: < 1 mm difference

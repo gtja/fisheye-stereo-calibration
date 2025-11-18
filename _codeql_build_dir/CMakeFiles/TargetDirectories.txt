@@ -1,3 +1,0 @@
-/home/runner/work/fisheye-stereo-calibration/fisheye-stereo-calibration/_codeql_build_dir/CMakeFiles/calibrate.dir
-/home/runner/work/fisheye-stereo-calibration/fisheye-stereo-calibration/_codeql_build_dir/CMakeFiles/edit_cache.dir
-/home/runner/work/fisheye-stereo-calibration/fisheye-stereo-calibration/_codeql_build_dir/CMakeFiles/rebuild_cache.dir
