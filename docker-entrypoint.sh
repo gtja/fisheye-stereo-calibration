@@ -123,13 +123,14 @@ if [ $# -gt 0 ]; then
         echo ""
         echo "╔════════════════════════════════════════════════════════════════════════════╗"
         if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
-            echo "║         RUNNING DOUBLE-SPHERE STEREO CALIBRATION                           ║"
+            echo "║         1RUNNING DOUBLE-SPHERE STEREO CALIBRATION                           ║"
         else
             echo "║         RUNNING STEREO CALIBRATION                                         ║"
         fi
         echo "╚════════════════════════════════════════════════════════════════════════════╝"
         echo ""
         if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+            echo "Command: ./calibrate_ds ${args[@]}"
             exec ./calibrate_ds "${args[@]}"
         else
             exec ./calibrate "${args[@]}"

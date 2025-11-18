@@ -220,7 +220,8 @@ int main(int argc, char const *argv[])
     char* rightimg_filename;
     char* out_file;
     char* extension = (char*)"jpg";
-    
+
+    printf("[LOG] Initializing popt options...\n");
     static struct poptOption options[] = {
         { "board_width",'w',POPT_ARG_INT,&board_width,0,"Checkerboard width","NUM" },
         { "board_height",'h',POPT_ARG_INT,&board_height,0,"Checkerboard height","NUM" },
@@ -233,9 +234,11 @@ int main(int argc, char const *argv[])
         POPT_AUTOHELP
         { NULL, 0, 0, NULL, 0, NULL, NULL }
     };
-    
+
+    printf("[LOG] Creating POpt object...\n");
     POpt popt(NULL, argc, argv, options, 0);
     int c;
+    printf("[LOG] Starting popt argument parsing...\n");
     while((c = popt.getNextOpt()) >= 0) {}
     
     printf("========== Double-Sphere Camera Calibration ==========\n");
