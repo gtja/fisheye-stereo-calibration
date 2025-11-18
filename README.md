@@ -6,10 +6,29 @@ This contains a source file to calibrate a stereo system comprising of fisheye l
 
 ### Dependencies
 
-- OpenCV
+- OpenCV (version 4.x recommended)
 - popt
 
-### Compilation
+### Docker Usage (Recommended)
+
+The easiest way to run the calibration is using Docker. See [DOCKER.md](DOCKER.md) for detailed instructions.
+
+**Quick start:**
+
+```bash
+# Build the Docker image
+docker build -t fisheye-stereo-calibration .
+
+# Run with your own images
+docker run -v /path/to/your/imgs:/data/imgs -v /path/to/output:/data/output \
+  fisheye-stereo-calibration \
+  -w 9 -h 6 -s 0.02423 -n 29 -d /data/imgs/ -l left -r right -o /data/output/cam_stereo.yml
+
+# Or test with sample images included in the container
+docker run -v $(pwd)/output:/data/output fisheye-stereo-calibration
+```
+
+### Manual Compilation
 
 Compile all the files using the following commands.
 
