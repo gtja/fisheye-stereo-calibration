@@ -17,6 +17,12 @@ This contains a source file to calibrate a stereo system comprising of fisheye l
 
 The `utils/` directory contains Python scripts to help improve calibration quality:
 
+- **`pre_calibration_check.py`**: Comprehensive image quality check (recommended)
+  ```bash
+  python3 utils/pre_calibration_check.py imgs/ --width 9 --height 6
+  ```
+  This script analyzes images for blur and corner detection quality, then creates a new filtered directory with only good images, renamed sequentially (e.g., left1.jpg, left2.jpg, ..., leftN.jpg). The original images remain untouched.
+
 - **`laplacian_var.py`**: Detect and filter blurry images using Laplacian variance
   ```bash
   python3 utils/laplacian_var.py imgs/ --threshold 100
@@ -38,7 +44,7 @@ These tools help identify problematic images before calibration, potentially red
 
 The easiest way to run the calibration is using Docker. See [DOCKER.md](DOCKER.md) for detailed instructions.
 
-**🆕 Automatic Quality Checks:** The Docker container now automatically checks and filters images before calibration by default! This includes blur detection and corner quality analysis, improving calibration accuracy by 30-50%.
+**🆕 Automatic Quality Checks:** The Docker container now automatically checks and filters images before calibration by default! This includes blur detection and corner quality analysis, improving calibration accuracy by 30-50%. The original images are kept intact - a new filtered directory with sequentially-named images is created and used for calibration.
 
 **Quick start:**
 
