@@ -52,11 +52,19 @@ docker run \
 Alternatively, you can pass command-line arguments directly:
 
 ```bash
+# With JPG images (default)
 docker run \
   -v /path/to/your/imgs:/data/imgs \
   -v /path/to/output:/data/output \
   fisheye-stereo-calibration \
   -w 9 -h 6 -s 0.02423 -n 29 -d /data/imgs/ -l left -r right -o /data/output/cam_stereo.yml
+
+# With BMP images
+docker run \
+  -v /path/to/your/imgs:/data/imgs \
+  -v /path/to/output:/data/output \
+  fisheye-stereo-calibration \
+  -w 9 -h 6 -s 0.02423 -n 29 -d /data/imgs/ -l left -r right -e bmp -o /data/output/cam_stereo.yml
 ```
 
 ### Example with Sample Images
@@ -77,12 +85,18 @@ docker run \
 ## Image Naming Convention
 
 Your images should follow this naming pattern:
-- Left camera images: `{LEFT_PREFIX}1.jpg`, `{LEFT_PREFIX}2.jpg`, ..., `{LEFT_PREFIX}N.jpg`
-- Right camera images: `{RIGHT_PREFIX}1.jpg`, `{RIGHT_PREFIX}2.jpg`, ..., `{RIGHT_PREFIX}N.jpg`
+- Left camera images: `{LEFT_PREFIX}1.{EXT}`, `{LEFT_PREFIX}2.{EXT}`, ..., `{LEFT_PREFIX}N.{EXT}`
+- Right camera images: `{RIGHT_PREFIX}1.{EXT}`, `{RIGHT_PREFIX}2.{EXT}`, ..., `{RIGHT_PREFIX}N.{EXT}`
 
-For example, with default prefixes:
+Where `{EXT}` is the image file extension (default: `jpg`).
+
+For example, with default prefixes and jpg format:
 - `left1.jpg`, `left2.jpg`, ..., `left29.jpg`
 - `right1.jpg`, `right2.jpg`, ..., `right29.jpg`
+
+For BMP images:
+- `left1.bmp`, `left2.bmp`, ..., `left29.bmp`
+- `right1.bmp`, `right2.bmp`, ..., `right29.bmp`
 
 ## Output
 
@@ -104,7 +118,9 @@ The calibration will generate a YAML file with the following calibration paramet
 - `-d, --img_dir STR`: Directory containing the images (must end with /)
 - `-l, --leftimg_filename STR`: Prefix for left camera images
 - `-r, --rightimg_filename STR`: Prefix for right camera images
+- `-e, --extension STR`: Image file extension (default: jpg). Supports jpg, bmp, png, and other OpenCV-compatible formats
 - `-o, --out_file STR`: Output calibration file path (YAML format)
+- `-b, --physical_baseline NUM`: Physical baseline distance in meters (optional, for accuracy evaluation)
 
 ## Troubleshooting
 
@@ -123,6 +139,7 @@ docker run --user $(id -u):$(id -g) \
 
 Make sure:
 1. Your image directory is correctly mounted
-2. Image files follow the naming convention (prefix + number + .jpg)
-3. The number of images specified matches the actual number of image pairs
-4. The directory path ends with a `/`
+2. Image files follow the naming convention (prefix + number + extension)
+3. The extension parameter matches your image file format (use `-e bmp` for BMP files, `-e png` for PNG files, etc.)
+4. The number of images specified matches the actual number of image pairs
+5. The directory path ends with a `/`

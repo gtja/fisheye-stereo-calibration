@@ -19,10 +19,15 @@ The easiest way to run the calibration is using Docker. See [DOCKER.md](DOCKER.m
 # Build the Docker image
 docker build -t fisheye-stereo-calibration .
 
-# Run with your own images
+# Run with your own images (JPG by default)
 docker run -v /path/to/your/imgs:/data/imgs -v /path/to/output:/data/output \
   fisheye-stereo-calibration \
   -w 9 -h 6 -s 0.02423 -n 29 -d /data/imgs/ -l left -r right -o /data/output/cam_stereo.yml
+
+# Run with BMP images
+docker run -v /path/to/your/imgs:/data/imgs -v /path/to/output:/data/output \
+  fisheye-stereo-calibration \
+  -w 9 -h 6 -s 0.02423 -n 29 -d /data/imgs/ -l left -r right -e bmp -o /data/output/cam_stereo.yml
 
 # Or test with sample images included in the container
 docker run -v $(pwd)/output:/data/output fisheye-stereo-calibration
@@ -56,6 +61,12 @@ For example if you use the images in the `imgs` folder run the following command
 
 ```bash
 ./calibrate -w 9 -h 6 -s 0.02423 -n 29 -d ../imgs/ -l left -r right -o cam_stereo.yml
+```
+
+You can also optionally specify the image file extension (default is `jpg`). This allows you to use BMP or other supported image formats:
+
+```bash
+./calibrate -w 9 -h 6 -s 0.02423 -n 29 -d ../imgs/ -l left -r right -e bmp -o cam_stereo.yml
 ```
 
 You can also optionally specify the physical baseline distance (in meters) to evaluate the baseline calibration accuracy:
