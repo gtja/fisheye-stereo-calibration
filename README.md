@@ -143,6 +143,7 @@ For applications requiring sub-pixel accuracy (<0.15 pixels) or extreme fisheye 
 - Double-Sphere projection (Usenko et al., 2018)
 - SE(3) pre-correction for improved corner detection
 - Ceres-based Bundle Adjustment with Huber robust kernel
+- **Automatic fallback to omnidir model for extreme FOV (>200°, e.g., 220°)**
 - Typically achieves 0.1-0.15 pixels RMSE (vs 0.3 pixels with standard methods)
 
 **Requirements:** Ceres Solver must be installed (`sudo apt-get install libceres-dev`)

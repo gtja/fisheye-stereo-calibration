@@ -1,5 +1,6 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/calib3d/calib3d.hpp>
+#include <opencv2/ccalib/omnidir.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <ceres/ceres.h>
@@ -367,22 +368,117 @@ int main(int argc, char const *argv[])
     printf("Attempting fisheye::stereoCalibrate with %zu image pairs...\n", obj_pts_init.size());
     fflush(stdout);
     
+    bool fisheye_success = false;
     try {
         fisheye::stereoCalibrate(obj_pts_init, left_pts_init, right_pts_init,
                                 K1_kb4, D1_kb4, K2_kb4, D2_kb4, img1.size(), R_kb4, T_kb4, flag,
                                 TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
+        fisheye_success = true;
+        printf("KB4 fisheye calibration succeeded\n");
     } catch (const cv::Exception& e) {
-        cerr << "Error in fisheye::stereoCalibrate: " << e.what() << endl;
-        cerr << "This usually indicates issues with the calibration images:" << endl;
-        cerr << "  - Images may have excessive distortion" << endl;
-        cerr << "  - Checkerboard corners may not be detected accurately" << endl;
-        cerr << "  - Image pairs may not show the same checkerboard view" << endl;
-        cerr << "  - Need more or better quality calibration images" << endl;
-        cerr.flush();
-        return 1;
+        printf("Fisheye model failed (expected for FOV > 200°): %s\n", e.what());
+        printf("Falling back to omnidir (MEI) model for initial calibration...\n");
+        fflush(stdout);
+        
+        // Fallback: Use omnidir (MEI) model for extreme wide-angle lenses
+        // Convert Point2d to Point2f and Point3d to Point3f for omnidir compatibility
+        vector<vector<Point2f>> left_pts_init_f, right_pts_init_f;
+        vector<vector<Point3f>> obj_pts_init_f;
+        
+        for (size_t i = 0; i < obj_pts_init.size(); i++) {
+            vector<Point3f> obj_f;
+            for (size_t j = 0; j < obj_pts_init[i].size(); j++) {
+                obj_f.push_back(Point3f((float)obj_pts_init[i][j].x, (float)obj_pts_init[i][j].y, (float)obj_pts_init[i][j].z));
+            }
+            obj_pts_init_f.push_back(obj_f);
+        }
+        
+        for (size_t i = 0; i < left_pts_init.size(); i++) {
+            vector<Point2f> v1, v2;
+            for (size_t j = 0; j < left_pts_init[i].size(); j++) {
+                v1.push_back(Point2f((float)left_pts_init[i][j].x, (float)left_pts_init[i][j].y));
+                v2.push_back(Point2f((float)right_pts_init[i][j].x, (float)right_pts_init[i][j].y));
+            }
+            left_pts_init_f.push_back(v1);
+            right_pts_init_f.push_back(v2);
+        }
+        
+        Mat K1_mat, K2_mat, D1_mat, D2_mat, xi1_mat, xi2_mat, R_mat, T_mat;
+        vector<Vec3d> rvecs_left, tvecs_left, rvecs_right, tvecs_right;
+        
+        int omni_flags = 0;
+        omni_flags |= omnidir::CALIB_FIX_SKEW;
+        
+        try {
+            // Calibrate left camera first
+            printf("  Calibrating left camera with omnidir...\n");
+            fflush(stdout);
+            double rms_left = omnidir::calibrate(obj_pts_init_f, left_pts_init_f, img1.size(),
+                                                 K1_mat, xi1_mat, D1_mat, rvecs_left, tvecs_left,
+                                                 omni_flags,
+                                                 TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
+            printf("  Left camera RMS: %.4f\n", rms_left);
+            
+            // Calibrate right camera
+            printf("  Calibrating right camera with omnidir...\n");
+            fflush(stdout);
+            double rms_right = omnidir::calibrate(obj_pts_init_f, right_pts_init_f, img2.size(),
+                                                  K2_mat, xi2_mat, D2_mat, rvecs_right, tvecs_right,
+                                                  omni_flags,
+                                                  TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
+            printf("  Right camera RMS: %.4f\n", rms_right);
+            
+            // Stereo calibration with omnidir
+            printf("  Performing stereo calibration with omnidir...\n");
+            fflush(stdout);
+            Mat rvec_stereo, tvec_stereo;
+            double rms_stereo = omnidir::stereoCalibrate(obj_pts_init_f, left_pts_init_f, right_pts_init_f,
+                                                         img1.size(), img2.size(),
+                                                         K1_mat, xi1_mat, D1_mat,
+                                                         K2_mat, xi2_mat, D2_mat,
+                                                         rvec_stereo, tvec_stereo, rvecs_left, tvecs_left,
+                                                         omni_flags | omnidir::CALIB_USE_GUESS,
+                                                         TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
+            printf("  Stereo calibration RMS: %.4f\n", rms_stereo);
+            
+            // Convert omnidir results to KB4 format
+            // Extract intrinsics
+            K1_kb4 = Matx33d((double*)K1_mat.data);
+            K2_kb4 = Matx33d((double*)K2_mat.data);
+            
+            // Extract first 4 distortion coefficients (omnidir has more, but KB4 uses 4)
+            D1_kb4 = Vec4d(D1_mat.at<double>(0), D1_mat.at<double>(1), 
+                          D1_mat.at<double>(2), D1_mat.at<double>(3));
+            D2_kb4 = Vec4d(D2_mat.at<double>(0), D2_mat.at<double>(1), 
+                          D2_mat.at<double>(2), D2_mat.at<double>(3));
+            
+            // Convert rotation vector to rotation matrix
+            Rodrigues(rvec_stereo, R_mat);
+            R_kb4 = Matx33d((double*)R_mat.data);
+            T_kb4 = Vec3d(tvec_stereo.at<double>(0), tvec_stereo.at<double>(1), tvec_stereo.at<double>(2));
+            
+            printf("Omnidir calibration succeeded as fallback\n");
+            printf("  Mirror parameters: xi1=%.6f, xi2=%.6f\n", 
+                   xi1_mat.at<double>(0), xi2_mat.at<double>(0));
+            
+        } catch (const cv::Exception& e2) {
+            cerr << "Error: Both fisheye and omnidir calibration failed!" << endl;
+            cerr << "Omnidir error: " << e2.what() << endl;
+            cerr << "\nPossible causes:" << endl;
+            cerr << "  - Images may have excessive distortion even for omnidir model" << endl;
+            cerr << "  - Checkerboard corners may not be detected accurately" << endl;
+            cerr << "  - Image pairs may not show the same checkerboard view" << endl;
+            cerr << "  - Need more or better quality calibration images" << endl;
+            cerr.flush();
+            return 1;
+        }
     }
     
-    printf("KB4 calibration complete\n");
+    if (fisheye_success) {
+        printf("KB4 calibration complete\n");
+    } else {
+        printf("Initial calibration complete (using omnidir model)\n");
+    }
     printf("  Left camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n", 
            K1_kb4(0,0), K1_kb4(1,1), K1_kb4(0,2), K1_kb4(1,2));
     printf("  Right camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n",

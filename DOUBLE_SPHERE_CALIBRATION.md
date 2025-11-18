@@ -35,19 +35,30 @@ The KB4 model is used for initial coarse calibration:
 
 ## Calibration Pipeline
 
-### Step 1: KB4 Coarse Calibration
+### Step 1: Initial Coarse Calibration with Automatic Fallback
 
-The pipeline starts with a standard OpenCV fisheye calibration:
+The pipeline starts with a standard OpenCV fisheye (KB4) calibration:
 
 ```cpp
 cv::fisheye::stereoCalibrate(object_points, left_img_points, right_img_points,
                             K1, D1, K2, D2, img_size, R, T, flags, term_criteria);
 ```
 
+**New Feature**: For extreme wide-angle lenses (FOV > 200°, such as 220°), the standard fisheye model may fail with an assertion error. The pipeline now automatically falls back to the **omnidirectional (MEI) model** when fisheye calibration fails:
+
+```cpp
+cv::omnidir::stereoCalibrate(object_points, left_img_points, right_img_points,
+                            img_sizes, K1, xi1, D1, K2, xi2, D2, 
+                            rvec, tvec, rvecs, tvecs, flags, term_criteria);
+```
+
 This provides:
 - Initial intrinsic parameters (fx, fy, cx, cy)
-- Initial distortion coefficients (k1-k4)
+- Initial distortion coefficients (k1-k4, extracted from omnidir's distortion model)
 - Initial stereo extrinsics (R, T)
+- Mirror parameters (xi1, xi2) when using omnidir model
+
+The fallback mechanism ensures robust calibration across a wider range of fisheye lenses, from standard fisheye (~180° FOV) to extreme wide-angle (>200° FOV).
 
 ### Step 2: SE(3) Pre-correction for Corner Detection
 
