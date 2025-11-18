@@ -28,3 +28,9 @@
 *.app
 
 build/
+
+# Output directory
+output/
+
+# CodeQL artifacts
+_codeql_detected_source_root

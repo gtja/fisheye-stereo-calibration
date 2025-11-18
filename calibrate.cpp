@@ -25,28 +25,28 @@ void load_image_points(int board_width, int board_height, float square_size, int
     char left_img[100], right_img[100];
     sprintf(left_img, "%s%s%d.jpg", img_dir, leftimg_filename, i);
     sprintf(right_img, "%s%s%d.jpg", img_dir, rightimg_filename, i);
-    img1 = imread(left_img, CV_LOAD_IMAGE_COLOR);
-    img2 = imread(right_img, CV_LOAD_IMAGE_COLOR);
-    cv::cvtColor(img1, gray1, CV_BGR2GRAY);
-    cv::cvtColor(img2, gray2, CV_BGR2GRAY);
+    img1 = imread(left_img, cv::IMREAD_COLOR);
+    img2 = imread(right_img, cv::IMREAD_COLOR);
+    cv::cvtColor(img1, gray1, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(img2, gray2, cv::COLOR_BGR2GRAY);
 
     bool found1 = false, found2 = false;
 
     found1 = cv::findChessboardCorners(img1, board_size, corners1,
-  CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
+  cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_FILTER_QUADS);
     found2 = cv::findChessboardCorners(img2, board_size, corners2,
-  CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FILTER_QUADS);
+  cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_FILTER_QUADS);
 
     if (found1)
     {
       cv::cornerSubPix(gray1, corners1, cv::Size(5, 5), cv::Size(-1, -1),
-  cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
+  cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 0.1));
       cv::drawChessboardCorners(gray1, board_size, corners1, found1);
     }
     if (found2)
     {
       cv::cornerSubPix(gray2, corners2, cv::Size(5, 5), cv::Size(-1, -1),
-  cv::TermCriteria(CV_TERMCRIT_EPS | CV_TERMCRIT_ITER, 30, 0.1));
+  cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 0.1));
       cv::drawChessboardCorners(gray2, board_size, corners2, found2);
     }
 
@@ -129,7 +129,7 @@ int main(int argc, char const *argv[])
 
   cv::Mat R1, R2, P1, P2, Q;
   cv::fisheye::stereoRectify(K1, D1, K2, D2, img1.size(), R, T, R1, R2, P1, P2, 
-Q, CV_CALIB_ZERO_DISPARITY, img1.size(), 0.0, 1.1);
+Q, cv::CALIB_ZERO_DISPARITY, img1.size(), 0.0, 1.1);
 
   fs1 << "R1" << R1;
   fs1 << "R2" << R2;
