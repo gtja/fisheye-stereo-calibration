@@ -415,7 +415,12 @@ int main(int argc, char const *argv[])
     // Initialize extrinsics using OpenCV solvePnP with KB4 model
     for (size_t i = 0; i < object_points.size(); i++) {
         Mat rvec_left, tvec_left, rvec_right, tvec_right;
-        
+        // 日志：当前处理的第i组数据
+        std::cout << "[LOG] solvePnP for image pair " << i << std::endl;
+        std::cout << "[LOG] object_points[i].size(): " << object_points[i].size() << std::endl;
+        std::cout << "[LOG] left_img_points[i].size(): " << left_img_points[i].size() << std::endl;
+        std::cout << "[LOG] right_img_points[i].size(): " << right_img_points[i].size() << std::endl;
+
         // Use KB4 for initial pose estimation
         vector<Point2f> img_pts_left_f, img_pts_right_f;
         for (const auto& pt : left_img_points[i]) {
@@ -424,31 +429,50 @@ int main(int argc, char const *argv[])
         for (const auto& pt : right_img_points[i]) {
             img_pts_right_f.push_back(Point2f(pt.x, pt.y));
         }
-        
+
+        // 日志：显示部分点坐标
+        if (!img_pts_left_f.empty()) {
+            std::cout << "[LOG] left_img_points[i][0]: (" << img_pts_left_f[0].x << ", " << img_pts_left_f[0].y << ")" << std::endl;
+        }
+        if (!img_pts_right_f.empty()) {
+            std::cout << "[LOG] right_img_points[i][0]: (" << img_pts_right_f[0].x << ", " << img_pts_right_f[0].y << ")" << std::endl;
+        }
+
         // Use standard solvePnP with fisheye camera model
         // Note: OpenCV doesn't have fisheye::solvePnP, but we can use standard solvePnP
         // as initial guess since it will be refined by Bundle Adjustment
-        solvePnP(object_points[i], img_pts_left_f, Mat(K1_kb4), D1_kb4, 
-                 rvec_left, tvec_left, false, SOLVEPNP_ITERATIVE);
-        solvePnP(object_points[i], img_pts_right_f, Mat(K2_kb4), D2_kb4,
-                 rvec_right, tvec_right, false, SOLVEPNP_ITERATIVE);
-        
+        try {
+            solvePnP(object_points[i], img_pts_left_f, Mat(K1_kb4), D1_kb4, 
+                     rvec_left, tvec_left, false, SOLVEPNP_ITERATIVE);
+        } catch (const cv::Exception& e) {
+            std::cerr << "[ERROR] solvePnP left failed at i=" << i << ": " << e.what() << std::endl;
+            throw;
+        }
+        try {
+            solvePnP(object_points[i], img_pts_right_f, Mat(K2_kb4), D2_kb4,
+                     rvec_right, tvec_right, false, SOLVEPNP_ITERATIVE);
+        } catch (const cv::Exception& e) {
+            std::cerr << "[ERROR] solvePnP right failed at i=" << i << ": " << e.what() << std::endl;
+            throw;
+        }
+
         double* extrinsics_left = new double[6];
         double* extrinsics_right = new double[6];
-        
+
         for (int j = 0; j < 3; j++) {
             extrinsics_left[j] = rvec_left.at<double>(j);
             extrinsics_left[j+3] = tvec_left.at<double>(j);
             extrinsics_right[j] = rvec_right.at<double>(j);
             extrinsics_right[j+3] = tvec_right.at<double>(j);
         }
-        
+
         camera_extrinsics_left.push_back(extrinsics_left);
         camera_extrinsics_right.push_back(extrinsics_right);
     }
     
     // Build Ceres optimization problem
     ceres::Problem problem;
+    std::cout << "[LOG] Adding residuals for all observations..." << std::endl;
     
     // Add residuals for all observations
     for (size_t i = 0; i < object_points.size(); i++) {
@@ -474,8 +498,10 @@ int main(int argc, char const *argv[])
             problem.AddResidualBlock(cost_func_right, loss_func_right,
                                     camera_intrinsics_right, camera_extrinsics_right[i]);
         }
+        std::cout << "[LOG] Added residuals for image pair " << i << std::endl;
     }
     
+    std::cout << "[LOG] Setting parameter bounds..." << std::endl;
     // Set bounds on parameters
     problem.SetParameterLowerBound(camera_intrinsics_left, 4, -1.0);  // xi >= -1
     problem.SetParameterUpperBound(camera_intrinsics_left, 4, 1.0);   // xi <= 1
@@ -487,6 +513,7 @@ int main(int argc, char const *argv[])
     problem.SetParameterLowerBound(camera_intrinsics_right, 5, 0.0);
     problem.SetParameterUpperBound(camera_intrinsics_right, 5, 1.0);
     
+    std::cout << "[LOG] Configuring Ceres solver..." << std::endl;
     // Configure solver
     ceres::Solver::Options solver_options;
     solver_options.linear_solver_type = ceres::SPARSE_SCHUR;
@@ -494,6 +521,7 @@ int main(int argc, char const *argv[])
     solver_options.max_num_iterations = 100;
     solver_options.function_tolerance = 1e-6;
     
+    std::cout << "[LOG] Starting Ceres optimization..." << std::endl;
     ceres::Solver::Summary summary;
     ceres::Solve(solver_options, &problem, &summary);
     
