@@ -344,14 +344,18 @@ Disabling CALIB_ZERO_DISPARITY can reduce rectification error by up to 30% in so
 
 **Standard fisheye model may be insufficient**. Consider:
 
-1. **OpenCV omnidir** (MEI model)
-   ```cpp
-   cv::omnidir::calibrate(...)
+1. **OpenCV omnidir** (MEI model) - Now supported via `-m omnidir` flag
+   ```bash
+   ./calibrate -w 9 -h 6 -s 0.02423 -d imgs/ -l left -r right -m omnidir -o output.yml
    ```
+   This model adds a mirror parameter ξ (xi) to the standard k1-k4 distortion coefficients.
+   
+   **Note**: Currently experimental due to OpenCV 4.6.0 compatibility issues. May require properly configured OpenCV contrib modules or newer OpenCV version.
 
 2. **Kannala-Brandt (KB6)** model (6 distortion coefficients)
    - Available in Kalibr or Basalt
    - Can achieve < 0.2 pixel error for extreme lenses
+   - Recommended for production use with extreme wide-angle lenses
 
 ### Capture Strategy
 

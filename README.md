@@ -110,6 +110,32 @@ You can also optionally specify the physical baseline distance (in meters) to ev
 ./calibrate -w 9 -h 6 -s 0.02423 -n 29 -d ../imgs/ -l left -r right -o cam_stereo.yml -b 0.110
 ```
 
+### Camera Models
+
+The calibration program supports two camera models:
+
+#### Fisheye Model (Default)
+
+The standard fisheye model works well for most fisheye lenses up to ~200° FOV. It uses 4 distortion coefficients (k1-k4).
+
+```bash
+./calibrate -w 9 -h 6 -s 0.02423 -d ../imgs/ -l left -r right -o cam_stereo.yml
+# Or explicitly:
+./calibrate -w 9 -h 6 -s 0.02423 -d ../imgs/ -l left -r right -m fisheye -o cam_stereo.yml
+```
+
+####  MEI/Omnidirectional Model (Experimental)
+
+For extreme wide-angle lenses (FOV > 200°, such as 220°), the MEI (Unified Camera Model) with mirror parameter ξ provides better accuracy. This model includes:
+- Mirror parameter ξ (xi) for modeling the projection surface
+- 4 distortion coefficients (k1-k4)
+
+```bash
+./calibrate -w 9 -h 6 -s 0.02423 -d ../imgs/ -l left -r right -m omnidir -o cam_stereo.yml
+```
+
+**Note**: The omnidir/MEI model support is currently experimental due to compatibility issues with OpenCV 4.6.0's omnidir module. The implementation is complete but may require OpenCV contrib modules to be properly configured or a newer version of OpenCV. For production use with extreme wide-angle lenses, consider using external calibration tools like [Kalibr](https://github.com/ethz-asl/kalibr) or [Basalt](https://gitlab.com/VladyslavUsenko/basalt) which have more mature omnidirectional camera support.
+
 ### Calibration Accuracy Evaluation
 
 The calibration program automatically evaluates the accuracy of the calibration and outputs the following metrics:
