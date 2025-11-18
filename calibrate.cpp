@@ -97,8 +97,8 @@ void load_image_points(int board_width, int board_height, float square_size, int
 
   for (int i : common_indices) {
     char left_img[100], right_img[100];
-    sprintf(left_img, "%s%s%d.%s", img_dir, leftimg_filename, i, extension);
-    sprintf(right_img, "%s%s%d.%s", img_dir, rightimg_filename, i, extension);
+    sprintf(left_img, "%s/%s%d.%s", img_dir, leftimg_filename, i, extension);
+    sprintf(right_img, "%s/%s%d.%s", img_dir, rightimg_filename, i, extension);
     img1 = imread(left_img, cv::IMREAD_COLOR);
     img2 = imread(right_img, cv::IMREAD_COLOR);
     
