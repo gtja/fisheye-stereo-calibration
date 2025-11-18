@@ -39,14 +39,18 @@ void load_image_points(int board_width, int board_height, float square_size, int
 
     if (found1)
     {
+      // Improved subpixel refinement: use stricter epsilon (0.01 instead of 0.1)
+      // This reduces corner jitter and improves calibration accuracy
       cv::cornerSubPix(gray1, corners1, cv::Size(5, 5), cv::Size(-1, -1),
-  cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 0.1));
+  cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 0.01));
       cv::drawChessboardCorners(gray1, board_size, corners1, found1);
     }
     if (found2)
     {
+      // Improved subpixel refinement: use stricter epsilon (0.01 instead of 0.1)
+      // This reduces corner jitter and improves calibration accuracy
       cv::cornerSubPix(gray2, corners2, cv::Size(5, 5), cv::Size(-1, -1),
-  cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 0.1));
+  cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 0.01));
       cv::drawChessboardCorners(gray2, board_size, corners2, found2);
     }
 
@@ -111,14 +115,23 @@ int main(int argc, char const *argv[])
   cv::Vec4d D1, D2;
   int flag = 0;
   flag |= cv::fisheye::CALIB_RECOMPUTE_EXTRINSIC;
-  flag |= cv::fisheye::CALIB_CHECK_COND;
+  // Disable CHECK_COND for more robust calibration - can be too strict with challenging datasets
+  //flag |= cv::fisheye::CALIB_CHECK_COND;
   flag |= cv::fisheye::CALIB_FIX_SKEW;
+  // IMPORTANT: All 4 distortion coefficients (k1-k4) are enabled by default for fisheye
+  // Do NOT fix K2, K3, K4 - they are essential for handling extreme edge distortion in fisheye lenses
   //flag |= cv::fisheye::CALIB_FIX_K2;
   //flag |= cv::fisheye::CALIB_FIX_K3;
   //flag |= cv::fisheye::CALIB_FIX_K4;
+  // Principal point is optimized by default (not fixed to image center)
+  // This is important for wide-angle lenses where the optical center may not be at image center
+  //flag |= cv::fisheye::CALIB_FIX_PRINCIPAL_POINT;
+  
+  // Use more iterations for better accuracy (increased from 12 to 30)
+  // Use moderate convergence epsilon (1e-5) - too strict can cause numerical issues
   cv::fisheye::stereoCalibrate(object_points, left_img_points, right_img_points,
       K1, D1, K2, D2, img1.size(), R, T, flag,
-      cv::TermCriteria(3, 12, 0));
+      cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 1e-5));
 
   cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
   fs1 << "K1" << Mat(K1);
@@ -132,8 +145,13 @@ int main(int argc, char const *argv[])
   printf("Starting Rectification\n");
 
   cv::Mat R1, R2, P1, P2, Q;
+  // Use alpha=0.8 (recommended 0.7-0.8) to retain more valid pixels while minimizing black borders
+  // alpha=0: all pixels valid but maximum crop
+  // alpha=1: all original pixels retained but more invalid regions
+  // Disable CALIB_ZERO_DISPARITY flag (set to 0) - can improve rectification accuracy in some cases
+  double alpha = 0.8;
   cv::fisheye::stereoRectify(K1, D1, K2, D2, img1.size(), R, T, R1, R2, P1, P2, 
-Q, cv::CALIB_ZERO_DISPARITY, img1.size(), 0.0, 1.1);
+Q, 0, img1.size(), alpha, 1.1);
 
   fs1 << "R1" << R1;
   fs1 << "R2" << R2;

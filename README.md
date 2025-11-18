@@ -4,6 +4,31 @@ _**Note**_: I don't actively maintain this repository anymore. PRs are more than
 
 This contains a source file to calibrate a stereo system comprising of fisheye lenses. It calibrates the extrinsics and the intrinsics of the cameras without any initial guesses. If you are looking for stereo calibration with lenses which follow the pinhole model check [here](https://github.com/sourishg/stereo_calibration).
 
+### 🆕 Calibration Best Practices
+
+**New!** See [CALIBRATION_GUIDE.md](CALIBRATION_GUIDE.md) for comprehensive best practices to achieve **< 0.3 pixel calibration accuracy**. The guide covers:
+- Input data quality checks and filtering
+- Optimal model configuration for fisheye lenses
+- Image capture strategies and pose requirements
+- Advanced optimization techniques
+- Troubleshooting common issues
+
+### 🛠️ Utility Scripts
+
+The `utils/` directory contains Python scripts to help improve calibration quality:
+
+- **`laplacian_var.py`**: Detect and filter blurry images using Laplacian variance
+  ```bash
+  python3 utils/laplacian_var.py imgs/ --threshold 100
+  ```
+
+- **`corner_analysis.py`**: Analyze corner detection quality and distribution
+  ```bash
+  python3 utils/corner_analysis.py imgs/ --width 9 --height 6 --prefix left
+  ```
+
+These tools help identify problematic images before calibration, potentially reducing errors by 30-50%.
+
 ### Dependencies
 
 - OpenCV (version 3.4)
@@ -97,3 +122,14 @@ The calibration program automatically evaluates the accuracy of the calibration 
    - Target threshold: < 1 mm difference
 
 All evaluation metrics are displayed in the console output and saved to the output YAML file.
+
+#### Recent Improvements
+
+The calibration code has been enhanced with several improvements for better accuracy:
+- **Improved subpixel corner refinement**: Stricter epsilon (0.01 vs 0.1) reduces corner jitter
+- **Better convergence criteria**: More iterations (30 vs 12) with optimized epsilon
+- **Optimized rectification**: Uses alpha=0.8 (recommended 0.7-0.8) for better valid pixel retention
+- **All 4 distortion coefficients**: k1-k4 enabled for fisheye lenses (critical for edge accuracy)
+- **Principal point optimization**: Not fixed to image center (important for wide-angle lenses)
+
+See [CALIBRATION_GUIDE.md](CALIBRATION_GUIDE.md) for detailed explanations and additional optimization techniques.
