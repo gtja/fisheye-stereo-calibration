@@ -495,22 +495,57 @@ inline int calculateRectificationError(
     }
     
     // For extreme wide-angle lenses, use partial rectification to avoid negative Z
-    // Estimate the field of view from the focal length and image size
+    // Estimate the field of view by unprojecting corner points
     double avg_fx_check = (left_params.fx + right_params.fx) / 2.0;
-    double image_diagonal = std::sqrt(image_size.width * image_size.width + 
-                                      image_size.height * image_size.height);
-    double approx_fov_deg = 2.0 * std::atan(image_diagonal / (2.0 * avg_fx_check)) * 180.0 / M_PI;
+    
+    // Sample corner points to estimate actual FOV
+    double max_angle = 0.0;
+    std::vector<std::pair<double, double>> test_points = {
+        {0.0, 0.0},                                    // Top-left corner
+        {image_size.width - 1.0, 0.0},                 // Top-right corner
+        {0.0, image_size.height - 1.0},                // Bottom-left corner
+        {image_size.width - 1.0, image_size.height - 1.0}, // Bottom-right corner
+        {image_size.width / 2.0, 0.0},                 // Top center
+        {image_size.width / 2.0, image_size.height - 1.0}, // Bottom center
+        {0.0, image_size.height / 2.0},                // Left center
+        {image_size.width - 1.0, image_size.height / 2.0}  // Right center
+    };
+    
+    for (const auto& pt : test_points) {
+        double point2d[2] = {pt.first, pt.second};
+        double point3d[3];
+        if (unproject(left_params, point2d, point3d)) {
+            // Calculate angle from optical axis (Z-axis)
+            // point3d is already normalized to unit vector
+            double angle = std::acos(std::max(-1.0, std::min(1.0, point3d[2])));
+            if (angle > max_angle) {
+                max_angle = angle;
+            }
+        }
+    }
+    
+    // Convert to full FOV (diameter, not radius)
+    double approx_fov_deg = 2.0 * max_angle * 180.0 / M_PI;
+    
+    // Fallback to pinhole approximation if unprojection fails
+    if (max_angle < 1e-6) {
+        double image_diagonal = std::sqrt(image_size.width * image_size.width + 
+                                          image_size.height * image_size.height);
+        approx_fov_deg = 2.0 * std::atan(image_diagonal / (2.0 * avg_fx_check)) * 180.0 / M_PI;
+    }
     
     cv::Mat R_rect_left;
     double rect_strength = 1.0;  // 1.0 = full rectification, 0.0 = no rectification
     
-    if (approx_fov_deg > 170.0) {
-        // Extreme wide-angle lens: use partial rectification (40%)
-        rect_strength = 0.4;
+    if (approx_fov_deg > 200.0) {
+        // Ultra extreme wide-angle lens (FOV > 200°): use very gentle rectification (25%)
+        rect_strength = 0.25;
+    } else if (approx_fov_deg > 170.0) {
+        // Extreme wide-angle lens (FOV > 170°): use partial rectification (30%)
+        rect_strength = 0.30;
     } else if (approx_fov_deg > 130.0) {
-        // Wide-angle lens: use partial rectification (45%)
-        // Reduced from 0.7 to prevent points going behind camera (Z<0)
-        rect_strength = 0.45;
+        // Wide-angle lens (FOV > 130°): use partial rectification (40%)
+        rect_strength = 0.40;
     } else if (approx_fov_deg > 100.0) {
         // Moderate wide-angle lens: use partial rectification (70%)
         rect_strength = 0.7;
@@ -534,22 +569,26 @@ inline int calculateRectificationError(
     double avg_fx = (left_params.fx + right_params.fx) / 2.0;
     double avg_fy = (left_params.fy + right_params.fy) / 2.0;
     
-    // For wide-angle lenses, keep virtual focal length >= original focal length
-    // This prevents excessive distortion and keeps errors manageable
-    // Scaling down (< 1.0) causes the virtual camera to have wider FOV than the fisheye,
-    // leading to extreme distortions at image boundaries (600+ pixel errors)
+    // For wide-angle lenses, adjust virtual focal length based on FOV
+    // The virtual focal length determines the FOV of the rectified image
+    // For extreme wide-angle, we need to increase it to avoid mapping peripheral
+    // regions that would be behind the virtual camera
     double focal_scale = 1.0;
-    if (avg_fx < 300.0) {
-        // Extreme wide-angle lens detected (FOV > ~200°)
-        focal_scale = 1.1;  // Slightly increase to crop to common FOV
-    } else if (avg_fx < 500.0) {
-        // Wide-angle lens (FOV > ~150°)
-        focal_scale = 1.0;  // Keep same as original to match projection
-    } else if (avg_fx < 700.0) {
-        // Moderate wide-angle
-        focal_scale = 0.95; // Slight decrease is acceptable for narrower FOV
+    if (approx_fov_deg > 200.0) {
+        // Ultra extreme wide-angle (FOV > 200°): significantly increase focal length
+        // to crop to the central 100-120° FOV that can be safely rectified
+        focal_scale = 1.8;
+    } else if (approx_fov_deg > 170.0) {
+        // Extreme wide-angle (FOV > 170°): increase focal length to crop to ~120-140° FOV
+        focal_scale = 1.5;
+    } else if (approx_fov_deg > 130.0) {
+        // Wide-angle (FOV > 130°): modest increase to crop to ~100-120° FOV
+        focal_scale = 1.2;
+    } else if (approx_fov_deg > 100.0) {
+        // Moderate wide-angle: keep similar to original
+        focal_scale = 1.0;
     } else {
-        // Standard lens
+        // Standard lens: can use slightly reduced focal length
         focal_scale = 0.9;
     }
     
