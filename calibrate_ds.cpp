@@ -883,28 +883,20 @@ int main(int argc, char const *argv[])
     fflush(stdout);
     
     // Define rectified image size (virtual pinhole image)
-    // Use the original image size as a reasonable default to ensure all points can fit
-    // For extreme wide-angle lenses, increase the size to accommodate more points
+    // Keep it at original image size to avoid enlarging errors
+    // Previous approach of enlarging the image (1.5x-2x) combined with scaled-down
+    // virtual focal length caused extreme rectification errors (600+ pixels)
     cv::Size rectified_size = img1.size();
     
-    // Detect wide-angle lenses and increase rectified image size
+    // For extremely wide-angle lenses only, use modest increase
     double avg_fx = (ds_left.fx + ds_right.fx) / 2.0;
-    if (avg_fx < 300.0) {
-        // Extreme wide-angle lens detected (FOV > ~200°)
-        // Increase rectified image size by 2.0x to accommodate more points
-        rectified_size.width = static_cast<int>(img1.size().width * 2.0);
-        rectified_size.height = static_cast<int>(img1.size().height * 2.0);
-    } else if (avg_fx < 500.0) {
-        // Wide-angle lens (FOV > ~150°)
-        // Increase rectified image size by 1.5x
-        rectified_size.width = static_cast<int>(img1.size().width * 1.5);
-        rectified_size.height = static_cast<int>(img1.size().height * 1.5);
-    } else if (avg_fx < 700.0) {
-        // Moderate wide-angle lens
-        // Increase rectified image size by 1.25x
-        rectified_size.width = static_cast<int>(img1.size().width * 1.25);
-        rectified_size.height = static_cast<int>(img1.size().height * 1.25);
+    if (avg_fx < 250.0) {
+        // Extreme wide-angle lens detected (FOV > ~220°)
+        // Use modest 1.2x increase only for very extreme cases
+        rectified_size.width = static_cast<int>(img1.size().width * 1.2);
+        rectified_size.height = static_cast<int>(img1.size().height * 1.2);
     }
+    // For all other cases (avg_fx >= 250), keep original size
     
     printf("   Using rectified image size: %dx%d (original: %dx%d, avg_fx: %.1f)\n", 
            rectified_size.width, rectified_size.height, 

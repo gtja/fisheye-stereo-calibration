@@ -505,14 +505,15 @@ inline int calculateRectificationError(
     double rect_strength = 1.0;  // 1.0 = full rectification, 0.0 = no rectification
     
     if (approx_fov_deg > 170.0) {
-        // Extreme wide-angle lens: use partial rectification (50%)
-        rect_strength = 0.5;
+        // Extreme wide-angle lens: use partial rectification (40%)
+        rect_strength = 0.4;
     } else if (approx_fov_deg > 130.0) {
-        // Wide-angle lens: use partial rectification (70%)
-        rect_strength = 0.7;
+        // Wide-angle lens: use partial rectification (45%)
+        // Reduced from 0.7 to prevent points going behind camera (Z<0)
+        rect_strength = 0.45;
     } else if (approx_fov_deg > 100.0) {
-        // Moderate wide-angle lens: use partial rectification (85%)
-        rect_strength = 0.85;
+        // Moderate wide-angle lens: use partial rectification (70%)
+        rect_strength = 0.7;
     }
     
     if (rect_strength < 1.0) {
@@ -533,19 +534,23 @@ inline int calculateRectificationError(
     double avg_fx = (left_params.fx + right_params.fx) / 2.0;
     double avg_fy = (left_params.fy + right_params.fy) / 2.0;
     
-    // Scale down by a factor to fit more points in the rectified image
-    // For extreme wide-angle lenses (fx < 400), use more aggressive scaling
-    // This helps avoid out-of-bounds issues while still maintaining resolution
-    double focal_scale = 0.8;
+    // For wide-angle lenses, keep virtual focal length >= original focal length
+    // This prevents excessive distortion and keeps errors manageable
+    // Scaling down (< 1.0) causes the virtual camera to have wider FOV than the fisheye,
+    // leading to extreme distortions at image boundaries (600+ pixel errors)
+    double focal_scale = 1.0;
     if (avg_fx < 300.0) {
-        // Extreme wide-angle lens detected (FOV > ~200°), use very aggressive scaling
-        focal_scale = 0.4;
+        // Extreme wide-angle lens detected (FOV > ~200°)
+        focal_scale = 1.1;  // Slightly increase to crop to common FOV
     } else if (avg_fx < 500.0) {
-        // Wide-angle lens (FOV > ~150°), use more aggressive scaling
-        focal_scale = 0.6;
+        // Wide-angle lens (FOV > ~150°)
+        focal_scale = 1.0;  // Keep same as original to match projection
     } else if (avg_fx < 700.0) {
-        // Moderate wide-angle, use intermediate scaling
-        focal_scale = 0.7;
+        // Moderate wide-angle
+        focal_scale = 0.95; // Slight decrease is acceptable for narrower FOV
+    } else {
+        // Standard lens
+        focal_scale = 0.9;
     }
     
     VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height, 
