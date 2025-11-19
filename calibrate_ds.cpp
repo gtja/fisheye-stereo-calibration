@@ -638,6 +638,7 @@ int main(int argc, char const *argv[])
                                   TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
                 fisheye_success = true;
                 printf("KB4 fisheye calibration succeeded for left camera\n");
+                fflush(stdout);
                 // Set right camera parameters to left for consistency (won't be used)
                 K2_kb4 = K1_kb4;
                 D2_kb4 = D1_kb4;
@@ -654,6 +655,7 @@ int main(int argc, char const *argv[])
                                   TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
                 fisheye_success = true;
                 printf("KB4 fisheye calibration succeeded for right camera\n");
+                fflush(stdout);
                 // Set left camera parameters to right for consistency (won't be used)
                 K1_kb4 = K2_kb4;
                 D1_kb4 = D2_kb4;
