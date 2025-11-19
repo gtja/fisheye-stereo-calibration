@@ -486,14 +486,40 @@ inline int calculateRectificationError(
     
     // Build rectification rotation matrix for left camera
     // R_rect maps from left camera coordinates to rectified coordinates
-    cv::Mat R_rect_left = cv::Mat::zeros(3, 3, CV_64F);
+    cv::Mat R_rect_left_full = cv::Mat::zeros(3, 3, CV_64F);
     for (int i = 0; i < 3; i++) {
-        R_rect_left.at<double>(0, i) = e1.at<double>(i);
-        R_rect_left.at<double>(1, i) = e2.at<double>(i);
-        R_rect_left.at<double>(2, i) = e3.at<double>(i);
+        R_rect_left_full.at<double>(0, i) = e1.at<double>(i);
+        R_rect_left_full.at<double>(1, i) = e2.at<double>(i);
+        R_rect_left_full.at<double>(2, i) = e3.at<double>(i);
     }
     
-
+    // For extreme wide-angle lenses, use partial rectification to avoid negative Z
+    // Estimate the field of view from the focal length and image size
+    double avg_fx_check = (left_params.fx + right_params.fx) / 2.0;
+    double image_diagonal = std::sqrt(image_size.width * image_size.width + 
+                                      image_size.height * image_size.height);
+    double approx_fov_deg = 2.0 * std::atan(image_diagonal / (2.0 * avg_fx_check)) * 180.0 / M_PI;
+    
+    cv::Mat R_rect_left;
+    double rect_strength = 1.0;  // 1.0 = full rectification, 0.0 = no rectification
+    
+    if (approx_fov_deg > 180.0) {
+        // Extreme wide-angle lens: use partial rectification (50%)
+        rect_strength = 0.5;
+    } else if (approx_fov_deg > 150.0) {
+        // Wide-angle lens: use partial rectification (75%)
+        rect_strength = 0.75;
+    }
+    
+    if (rect_strength < 1.0) {
+        // Apply partial rectification using angle-axis interpolation
+        cv::Mat rvec_full;
+        cv::Rodrigues(R_rect_left_full, rvec_full);
+        cv::Mat rvec_partial = rvec_full * rect_strength;
+        cv::Rodrigues(rvec_partial, R_rect_left);
+    } else {
+        R_rect_left = R_rect_left_full.clone();
+    }
     
     // Rectification rotation for right camera
     cv::Mat R_rect_right = R_rect_left * R;
@@ -502,9 +528,22 @@ inline int calculateRectificationError(
     // Use average focal length from the calibrated cameras to better match the projection
     double avg_fx = (left_params.fx + right_params.fx) / 2.0;
     double avg_fy = (left_params.fy + right_params.fy) / 2.0;
+    
     // Scale down by a factor to fit more points in the rectified image
+    // For extreme wide-angle lenses (fx < 400), use more aggressive scaling
     // This helps avoid out-of-bounds issues while still maintaining resolution
     double focal_scale = 0.8;
+    if (avg_fx < 300.0) {
+        // Extreme wide-angle lens detected (FOV > ~200°), use very aggressive scaling
+        focal_scale = 0.4;
+    } else if (avg_fx < 500.0) {
+        // Wide-angle lens (FOV > ~150°), use more aggressive scaling
+        focal_scale = 0.6;
+    } else if (avg_fx < 700.0) {
+        // Moderate wide-angle, use intermediate scaling
+        focal_scale = 0.7;
+    }
+    
     VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height, 
                                      avg_fx * focal_scale);
     virtual_cam.fy = avg_fy * focal_scale;
@@ -581,19 +620,40 @@ inline int calculateRectificationError(
     
     if (valid_points > 0) {
         avg_error /= valid_points;
-    } else {
-        std::cerr << "Warning: No valid points found for rectification error calculation" << std::endl;
+    }
+    
+    // Always print diagnostics if we have fewer than 50% valid points
+    // This helps users understand what's happening with extreme wide-angle lenses
+    if (total_points > 0 && valid_points < total_points / 2) {
+        double valid_percentage = 100.0 * valid_points / total_points;
+        std::cerr << "\nRectification diagnostic information (only " << valid_percentage 
+                  << "% of points were valid):" << std::endl;
         std::cerr << "   Total corner points: " << total_points << std::endl;
-        std::cerr << "   Points behind camera: " << points_behind_camera << std::endl;
-        std::cerr << "   Points with negative Z after rectification: " << points_negative_z_rect << std::endl;
-        std::cerr << "   Points outside rectified image bounds: " << points_out_of_bounds << std::endl;
+        std::cerr << "   Valid points: " << valid_points << " (" << valid_percentage << "%)" << std::endl;
+        std::cerr << "   Points behind camera: " << points_behind_camera 
+                  << " (" << 100.0 * points_behind_camera / total_points << "%)" << std::endl;
+        std::cerr << "   Points with negative Z after rectification: " << points_negative_z_rect 
+                  << " (" << 100.0 * points_negative_z_rect / total_points << "%)" << std::endl;
+        std::cerr << "   Points outside rectified image bounds: " << points_out_of_bounds 
+                  << " (" << 100.0 * points_out_of_bounds / total_points << "%)" << std::endl;
         std::cerr << "   Rectified image size: " << rectified_size.width << "x" << rectified_size.height << std::endl;
+        std::cerr << "   Calibrated focal lengths: left_fx=" << left_params.fx << ", right_fx=" << right_params.fx << std::endl;
         std::cerr << "   Virtual camera: fx=" << virtual_cam.fx << ", fy=" << virtual_cam.fy 
                   << ", cx=" << virtual_cam.cx << ", cy=" << virtual_cam.cy << std::endl;
-        std::cerr << "Suggestions:" << std::endl;
-        std::cerr << "   - If all points are out of bounds, the rectified image size may be too small" << std::endl;
-        std::cerr << "   - If all points have negative Z, the rectification rotation may be incorrect" << std::endl;
-        std::cerr << "   - If all points are behind camera, the extrinsics may be incorrect" << std::endl;
+        
+        if (valid_points == 0) {
+            std::cerr << "Suggestions:" << std::endl;
+            if (points_out_of_bounds > total_points / 2) {
+                std::cerr << "   - Most points are out of bounds: rectified image size may be too small" << std::endl;
+            }
+            if (points_negative_z_rect > total_points / 2) {
+                std::cerr << "   - Most points have negative Z: this is expected for extreme wide-angle lenses (FOV > 180°)" << std::endl;
+                std::cerr << "   - Consider using the monocular and stereo reprojection errors as primary metrics" << std::endl;
+            }
+            if (points_behind_camera > total_points / 2) {
+                std::cerr << "   - Most points are behind camera: extrinsics may be incorrect" << std::endl;
+            }
+        }
     }
     
     return valid_points;
