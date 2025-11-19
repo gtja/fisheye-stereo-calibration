@@ -164,8 +164,8 @@ int main(int argc, char const *argv[])
   float square_size;
   float physical_baseline = -1.0; // Physical baseline in meters (optional)
   char* img_dir;
-  char* leftimg_filename;
-  char* rightimg_filename;
+  char* leftimg_filename = NULL;
+  char* rightimg_filename = NULL;
   char* out_file;
   char* extension = (char*)"jpg"; // Default to jpg for backward compatibility
   char* model = (char*)"fisheye"; // Default to fisheye model for backward compatibility

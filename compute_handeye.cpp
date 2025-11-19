@@ -56,8 +56,8 @@ int main(int argc, char const *argv[])
     int board_width, board_height;
     float square_size;
     char* img_dir;
-    char* leftimg_filename;
-    char* rightimg_filename;
+    char* leftimg_filename = NULL;
+    char* rightimg_filename = NULL;
     char* left_calib_file;
     char* right_calib_file;
     char* out_file = (char*)"handeye.yml";
