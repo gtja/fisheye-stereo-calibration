@@ -884,9 +884,31 @@ int main(int argc, char const *argv[])
     
     // Define rectified image size (virtual pinhole image)
     // Use the original image size as a reasonable default to ensure all points can fit
-    // This is especially important for wide-angle fisheye cameras
+    // For extreme wide-angle lenses, increase the size to accommodate more points
     cv::Size rectified_size = img1.size();
-    printf("   Using rectified image size: %dx%d\n", rectified_size.width, rectified_size.height);
+    
+    // Detect wide-angle lenses and increase rectified image size
+    double avg_fx = (ds_left.fx + ds_right.fx) / 2.0;
+    if (avg_fx < 300.0) {
+        // Extreme wide-angle lens detected (FOV > ~200°)
+        // Increase rectified image size by 2.0x to accommodate more points
+        rectified_size.width = static_cast<int>(img1.size().width * 2.0);
+        rectified_size.height = static_cast<int>(img1.size().height * 2.0);
+    } else if (avg_fx < 500.0) {
+        // Wide-angle lens (FOV > ~150°)
+        // Increase rectified image size by 1.5x
+        rectified_size.width = static_cast<int>(img1.size().width * 1.5);
+        rectified_size.height = static_cast<int>(img1.size().height * 1.5);
+    } else if (avg_fx < 700.0) {
+        // Moderate wide-angle lens
+        // Increase rectified image size by 1.25x
+        rectified_size.width = static_cast<int>(img1.size().width * 1.25);
+        rectified_size.height = static_cast<int>(img1.size().height * 1.25);
+    }
+    
+    printf("   Using rectified image size: %dx%d (original: %dx%d, avg_fx: %.1f)\n", 
+           rectified_size.width, rectified_size.height, 
+           img1.size().width, img1.size().height, avg_fx);
     fflush(stdout);
     
     // Compute average stereo transformation (R, T) from per-frame extrinsics
