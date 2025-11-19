@@ -880,6 +880,25 @@ int main(int argc, char const *argv[])
         // Ensure file is fully written to disk
         sync();
         
+        // Verify that the file was created and is readable
+        // This is a workaround for potential race conditions with file system sync
+        int max_retries = 10;
+        bool file_exists = false;
+        for (int retry = 0; retry < max_retries; retry++) {
+            if (access(output_file, F_OK) == 0 && access(output_file, R_OK) == 0) {
+                file_exists = true;
+                break;
+            }
+            // Wait a short time before retrying (10ms)
+            usleep(10000);
+        }
+        
+        if (!file_exists) {
+            cerr << "Error: Failed to verify file creation: " << output_file << endl;
+            cerr << "The file was written but could not be verified to exist." << endl;
+            return 1;
+        }
+        
         printf("Mono calibration saved successfully to %s\n", output_file);
         printf("Note: For better accuracy, run Bundle Adjustment with full DS model\n");
         fflush(stdout);
@@ -1795,6 +1814,25 @@ int main(int argc, char const *argv[])
     
     // Ensure file is fully written to disk
     sync();
+    
+    // Verify that the file was created and is readable
+    // This is a workaround for potential race conditions with file system sync
+    int max_retries = 10;
+    bool file_exists = false;
+    for (int retry = 0; retry < max_retries; retry++) {
+        if (access(out_file, F_OK) == 0 && access(out_file, R_OK) == 0) {
+            file_exists = true;
+            break;
+        }
+        // Wait a short time before retrying (10ms)
+        usleep(10000);
+    }
+    
+    if (!file_exists) {
+        cerr << "Error: Failed to verify file creation: " << out_file << endl;
+        cerr << "The file was written but could not be verified to exist." << endl;
+        return 1;
+    }
     
     printf("\n========== Calibration Complete ==========\n");
     printf("Double-Sphere Model Results:\n");
