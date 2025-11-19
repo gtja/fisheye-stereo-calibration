@@ -255,6 +255,318 @@ private:
     double world_x, world_y, world_z;
 };
 
+// Virtual pinhole camera parameters for rectification
+struct VirtualPinholeParams {
+    double fx, fy;  // Virtual focal length
+    double cx, cy;  // Virtual principal point (usually image center)
+    
+    VirtualPinholeParams(int width, int height, double focal_length = 300.0) :
+        fx(focal_length), fy(focal_length),
+        cx(width / 2.0), cy(height / 2.0) {}
+};
+
+// Create stereo rectification maps for Double-Sphere model
+// This implements custom rectification as standard OpenCV rectification doesn't support DS model
+// Approach: For each pixel in virtual rectified image, unproject to 3D ray, then project to original DS image
+inline void createStereoRectificationMaps(
+    const DoubleSphereParams& left_params,
+    const DoubleSphereParams& right_params,
+    const cv::Mat& R,  // Rotation from left to right camera (3x3)
+    const cv::Mat& T,  // Translation from left to right camera (3x1)
+    const cv::Size& image_size,
+    const cv::Size& rectified_size,
+    cv::Mat& map_left_x, cv::Mat& map_left_y,
+    cv::Mat& map_right_x, cv::Mat& map_right_y)
+{
+    // Create virtual pinhole camera parameters
+    VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height);
+    
+    // Initialize output maps
+    map_left_x.create(rectified_size, CV_32FC1);
+    map_left_y.create(rectified_size, CV_32FC1);
+    map_right_x.create(rectified_size, CV_32FC1);
+    map_right_y.create(rectified_size, CV_32FC1);
+    
+    // Compute rectification transforms
+    // For stereo rectification, we want both cameras to look in the same direction
+    // Standard approach: align with average optical axis
+    
+    // Compute rotation to align left camera with rectified coordinate system
+    // Rectified system: X-axis along baseline, Z-axis forward, Y-axis down
+    cv::Mat baseline = T.clone();
+    double baseline_norm = cv::norm(baseline);
+    if (baseline_norm < 1e-10) {
+        std::cerr << "Warning: Baseline too small for rectification" << std::endl;
+        return;
+    }
+    
+    // Standard stereo rectification approach:
+    // We want to create a rectified coordinate system where:
+    // - e1 (new X) points along the baseline (left to right)
+    // - e3 (new Z) points forward
+    // - e2 (new Y) completes the right-handed system
+    
+    // e1: normalized baseline direction (pointing from left to right)
+    cv::Mat e1 = baseline / baseline_norm;
+    
+    // We want e3 to point forward. Original forward is [0, 0, 1]
+    // e3 should be perpendicular to e1 and close to [0, 0, 1]
+    // Use Gram-Schmidt: e3 = forward - (forward·e1)e1, then normalize
+    cv::Mat forward = (cv::Mat_<double>(3,1) << 0, 0, 1);
+    double dot_product = e1.dot(forward);
+    cv::Mat e3 = forward - dot_product * e1;
+    double e3_norm = cv::norm(e3);
+    
+    if (e3_norm < 1e-10) {
+        // Baseline parallel to Z-axis, choose perpendicular direction
+        // Try Y-axis
+        forward = (cv::Mat_<double>(3,1) << 0, 1, 0);
+        dot_product = e1.dot(forward);
+        e3 = forward - dot_product * e1;
+        e3_norm = cv::norm(e3);
+    }
+    e3 = e3 / e3_norm;
+    
+    // Ensure e3 points forward (positive Z component)
+    if (e3.at<double>(2) < 0) {
+        e3 = -e3;
+    }
+    
+    // e2: completes right-handed system, e2 = e3 × e1
+    cv::Mat e2 = e3.cross(e1);
+    e2 = e2 / cv::norm(e2);
+    
+    // Build rectification rotation matrix for left camera
+    // R_rect maps from left camera coords to rectified coords
+    cv::Mat R_rect_left = cv::Mat::zeros(3, 3, CV_64F);
+    for (int i = 0; i < 3; i++) {
+        R_rect_left.at<double>(0, i) = e1.at<double>(i);
+        R_rect_left.at<double>(1, i) = e2.at<double>(i);
+        R_rect_left.at<double>(2, i) = e3.at<double>(i);
+    }
+    
+    // Rectification rotation for right camera: R_rect_right = R_rect_left * R
+    cv::Mat R_rect_right = R_rect_left * R;
+    
+    // Generate remapping for left camera
+    for (int v = 0; v < rectified_size.height; v++) {
+        for (int u = 0; u < rectified_size.width; u++) {
+            // Unproject from virtual pinhole to 3D ray in rectified coordinate system
+            double x_rect = (u - virtual_cam.cx) / virtual_cam.fx;
+            double y_rect = (v - virtual_cam.cy) / virtual_cam.fy;
+            double z_rect = 1.0;
+            
+            // Normalize to unit ray
+            double norm = std::sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
+            cv::Mat ray_rect = (cv::Mat_<double>(3,1) << x_rect/norm, y_rect/norm, z_rect/norm);
+            
+            // Transform ray from rectified to left camera coordinate system
+            cv::Mat ray_left = R_rect_left.t() * ray_rect;
+            
+            // Project ray to left camera using Double-Sphere model
+            double ray_left_data[3] = {ray_left.at<double>(0), ray_left.at<double>(1), ray_left.at<double>(2)};
+            double point2d[2];
+            
+            if (project(left_params, ray_left_data, point2d)) {
+                // Check if projection is within image bounds
+                if (point2d[0] >= 0 && point2d[0] < image_size.width &&
+                    point2d[1] >= 0 && point2d[1] < image_size.height) {
+                    map_left_x.at<float>(v, u) = static_cast<float>(point2d[0]);
+                    map_left_y.at<float>(v, u) = static_cast<float>(point2d[1]);
+                } else {
+                    map_left_x.at<float>(v, u) = -1.0f;
+                    map_left_y.at<float>(v, u) = -1.0f;
+                }
+            } else {
+                map_left_x.at<float>(v, u) = -1.0f;
+                map_left_y.at<float>(v, u) = -1.0f;
+            }
+        }
+    }
+    
+    // Generate remapping for right camera
+    for (int v = 0; v < rectified_size.height; v++) {
+        for (int u = 0; u < rectified_size.width; u++) {
+            // Unproject from virtual pinhole to 3D ray in rectified coordinate system
+            double x_rect = (u - virtual_cam.cx) / virtual_cam.fx;
+            double y_rect = (v - virtual_cam.cy) / virtual_cam.fy;
+            double z_rect = 1.0;
+            
+            // Normalize to unit ray
+            double norm = std::sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
+            cv::Mat ray_rect = (cv::Mat_<double>(3,1) << x_rect/norm, y_rect/norm, z_rect/norm);
+            
+            // Transform ray from rectified to right camera coordinate system
+            cv::Mat ray_right = R_rect_right.t() * ray_rect;
+            
+            // Project ray to right camera using Double-Sphere model
+            double ray_right_data[3] = {ray_right.at<double>(0), ray_right.at<double>(1), ray_right.at<double>(2)};
+            double point2d[2];
+            
+            if (project(right_params, ray_right_data, point2d)) {
+                // Check if projection is within image bounds
+                if (point2d[0] >= 0 && point2d[0] < image_size.width &&
+                    point2d[1] >= 0 && point2d[1] < image_size.height) {
+                    map_right_x.at<float>(v, u) = static_cast<float>(point2d[0]);
+                    map_right_y.at<float>(v, u) = static_cast<float>(point2d[1]);
+                } else {
+                    map_right_x.at<float>(v, u) = -1.0f;
+                    map_right_y.at<float>(v, u) = -1.0f;
+                }
+            } else {
+                map_right_x.at<float>(v, u) = -1.0f;
+                map_right_y.at<float>(v, u) = -1.0f;
+            }
+        }
+    }
+}
+
+// Calculate stereo rectification error using observed corner points
+// Returns average and maximum y-coordinate differences after rectification
+// This measures how well the rectification aligns corresponding points horizontally
+inline int calculateRectificationError(
+    const std::vector<std::vector<cv::Point3d>>& object_points,
+    const std::vector<std::vector<cv::Point2d>>& left_img_points,
+    const std::vector<std::vector<cv::Point2d>>& right_img_points,
+    const DoubleSphereParams& left_params,
+    const DoubleSphereParams& right_params,
+    const cv::Mat& R,
+    const cv::Mat& T,
+    const cv::Size& image_size,
+    const cv::Size& rectified_size,
+    const std::vector<double*>& camera_extrinsics_left,
+    const std::vector<double*>& camera_extrinsics_right,
+    double& avg_error,
+    double& max_error)
+{
+    avg_error = 0.0;
+    max_error = 0.0;
+    int valid_points = 0;
+    
+    // Compute rectification rotation matrices
+    cv::Mat baseline = T.clone();
+    double baseline_norm = cv::norm(baseline);
+    if (baseline_norm < 1e-10) {
+        std::cerr << "Warning: Baseline too small for rectification" << std::endl;
+        return 0;
+    }
+    
+    // Standard stereo rectification: e1 along baseline, e3 forward, e2 completes system
+    cv::Mat e1 = baseline / baseline_norm;
+    
+    // Use Gram-Schmidt to get e3 perpendicular to e1 and close to forward [0,0,1]
+    cv::Mat forward = (cv::Mat_<double>(3,1) << 0, 0, 1);
+    double dot_product = e1.dot(forward);
+    cv::Mat e3 = forward - dot_product * e1;
+    double e3_norm = cv::norm(e3);
+    
+    if (e3_norm < 1e-10) {
+        // Baseline parallel to Z, use Y-axis instead
+        forward = (cv::Mat_<double>(3,1) << 0, 1, 0);
+        dot_product = e1.dot(forward);
+        e3 = forward - dot_product * e1;
+        e3_norm = cv::norm(e3);
+    }
+    e3 = e3 / e3_norm;
+    
+    // Ensure e3 points forward (positive Z component)
+    if (e3.at<double>(2) < 0) {
+        e3 = -e3;
+    }
+    
+    // e2 completes right-handed system
+    cv::Mat e2 = e3.cross(e1);
+    e2 = e2 / cv::norm(e2);
+    
+    // Build rectification rotation matrix for left camera
+    // R_rect maps from left camera coordinates to rectified coordinates
+    cv::Mat R_rect_left = cv::Mat::zeros(3, 3, CV_64F);
+    for (int i = 0; i < 3; i++) {
+        R_rect_left.at<double>(0, i) = e1.at<double>(i);
+        R_rect_left.at<double>(1, i) = e2.at<double>(i);
+        R_rect_left.at<double>(2, i) = e3.at<double>(i);
+    }
+    
+
+    
+    // Rectification rotation for right camera
+    cv::Mat R_rect_right = R_rect_left * R;
+    
+    // Virtual pinhole camera parameters
+    VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height);
+    
+    // For each 3D point, project through both cameras and measure rectification error
+    for (size_t i = 0; i < object_points.size(); i++) {
+        for (size_t j = 0; j < object_points[i].size(); j++) {
+            // Transform 3D point to left camera coordinates using optimized extrinsics
+            double point_world[3] = {object_points[i][j].x, object_points[i][j].y, object_points[i][j].z};
+            double point_camera_left[3];
+            ceres::AngleAxisRotatePoint(camera_extrinsics_left[i], point_world, point_camera_left);
+            point_camera_left[0] += camera_extrinsics_left[i][3];
+            point_camera_left[1] += camera_extrinsics_left[i][4];
+            point_camera_left[2] += camera_extrinsics_left[i][5];
+            
+            // Transform 3D point to right camera coordinates using optimized extrinsics
+            double point_camera_right[3];
+            ceres::AngleAxisRotatePoint(camera_extrinsics_right[i], point_world, point_camera_right);
+            point_camera_right[0] += camera_extrinsics_right[i][3];
+            point_camera_right[1] += camera_extrinsics_right[i][4];
+            point_camera_right[2] += camera_extrinsics_right[i][5];
+            
+            // Skip points behind camera
+            if (point_camera_left[2] <= 0 || point_camera_right[2] <= 0) {
+                continue;
+            }
+            
+            // Transform 3D points from camera coordinates to rectified coordinate systems
+            // R_rect maps from camera to rectified, so we use it directly
+            cv::Mat pt_left_cam = (cv::Mat_<double>(3,1) << point_camera_left[0], point_camera_left[1], point_camera_left[2]);
+            cv::Mat pt_right_cam = (cv::Mat_<double>(3,1) << point_camera_right[0], point_camera_right[1], point_camera_right[2]);
+            
+            // Apply rectification: pt_rect = R_rect * pt_cam
+            cv::Mat pt_left_rect = R_rect_left * pt_left_cam;
+            cv::Mat pt_right_rect = R_rect_right * pt_right_cam;
+            
+
+            // Project to virtual pinhole image
+            if (pt_left_rect.at<double>(2) > 0 && pt_right_rect.at<double>(2) > 0) {
+                double u_left = virtual_cam.fx * (pt_left_rect.at<double>(0) / pt_left_rect.at<double>(2)) + virtual_cam.cx;
+                double v_left = virtual_cam.fy * (pt_left_rect.at<double>(1) / pt_left_rect.at<double>(2)) + virtual_cam.cy;
+                
+                double u_right = virtual_cam.fx * (pt_right_rect.at<double>(0) / pt_right_rect.at<double>(2)) + virtual_cam.cx;
+                double v_right = virtual_cam.fy * (pt_right_rect.at<double>(1) / pt_right_rect.at<double>(2)) + virtual_cam.cy;
+                
+                // Check if points are within rectified image bounds
+                if (v_left >= 0 && v_left < rectified_size.height &&
+                    v_right >= 0 && v_right < rectified_size.height &&
+                    u_left >= 0 && u_left < rectified_size.width &&
+                    u_right >= 0 && u_right < rectified_size.width) {
+                    
+                    // Compute y-coordinate difference (epipolar error)
+                    // After perfect rectification, corresponding points should have same y-coordinate
+                    double y_diff = std::abs(v_left - v_right);
+                    
+                    avg_error += y_diff;
+                    if (y_diff > max_error) {
+                        max_error = y_diff;
+                    }
+                    valid_points++;
+                }
+            }
+        }
+    }
+    
+
+    
+    if (valid_points > 0) {
+        avg_error /= valid_points;
+    } else {
+        std::cerr << "Warning: No valid points found for rectification error calculation" << std::endl;
+    }
+    
+    return valid_points;
+}
+
 } // namespace double_sphere
 
 #endif // DOUBLE_SPHERE_H

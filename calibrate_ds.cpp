@@ -877,12 +877,73 @@ int main(int argc, char const *argv[])
     fflush(stdout);
     
     // 4. Stereo Rectification Error
-    // Note: Double-Sphere model doesn't have built-in rectification like fisheye
-    // We would need to implement custom rectification for this model
-    // For now, we'll report this metric as "Not available for Double-Sphere model"
+    // Custom rectification implementation for Double-Sphere model
     printf("\n4. Stereo Rectification Error:\n");
-    printf("   Note: Rectification error evaluation not available for Double-Sphere model\n");
-    printf("   (requires custom rectification implementation for this camera model)\n");
+    printf("   Computing custom rectification for Double-Sphere model...\n");
+    fflush(stdout);
+    
+    // Define rectified image size (virtual pinhole image)
+    cv::Size rectified_size(960, 720);
+    
+    // Compute average stereo transformation (R, T) from per-frame extrinsics
+    // We'll use the median transformation for robustness
+    std::vector<cv::Mat> R_stereo_list;
+    std::vector<cv::Mat> T_stereo_list;
+    
+    for (size_t i = 0; i < object_points.size(); i++) {
+        // Get rotation matrices from angle-axis
+        cv::Mat R_left_mat(3, 3, CV_64F);
+        cv::Mat R_right_mat(3, 3, CV_64F);
+        cv::Mat rvec_left = (cv::Mat_<double>(3,1) << camera_extrinsics_left[i][0], 
+                             camera_extrinsics_left[i][1], camera_extrinsics_left[i][2]);
+        cv::Mat rvec_right = (cv::Mat_<double>(3,1) << camera_extrinsics_right[i][0],
+                              camera_extrinsics_right[i][1], camera_extrinsics_right[i][2]);
+        cv::Rodrigues(rvec_left, R_left_mat);
+        cv::Rodrigues(rvec_right, R_right_mat);
+        
+        // Get translation vectors
+        cv::Mat t_left = (cv::Mat_<double>(3,1) << camera_extrinsics_left[i][3],
+                          camera_extrinsics_left[i][4], camera_extrinsics_left[i][5]);
+        cv::Mat t_right = (cv::Mat_<double>(3,1) << camera_extrinsics_right[i][3],
+                           camera_extrinsics_right[i][4], camera_extrinsics_right[i][5]);
+        
+        // Compute relative transformation: R = R_right * R_left^T, T = t_right - R * t_left
+        cv::Mat R_stereo = R_right_mat * R_left_mat.t();
+        cv::Mat T_stereo = t_right - R_stereo * t_left;
+        
+        R_stereo_list.push_back(R_stereo);
+        T_stereo_list.push_back(T_stereo);
+    }
+    
+    // Compute average stereo transformation from optimized extrinsics
+    // Average the translation vectors
+    cv::Mat T_stereo_sum = cv::Mat::zeros(3, 1, CV_64F);
+    for (const auto& T : T_stereo_list) {
+        T_stereo_sum += T;
+    }
+    cv::Mat T_stereo_avg = T_stereo_sum / static_cast<double>(T_stereo_list.size());
+    
+    // For rotation, use the median or first transformation (averaging rotations is non-trivial)
+    // Using KB4 as a good stable reference
+    cv::Mat R_stereo_avg = cv::Mat(R_kb4);
+    
+    double avg_rectification_err = 0.0;
+    double max_rectification_err = 0.0;
+    
+    int num_rect_points = double_sphere::calculateRectificationError(
+        object_points, left_img_points, right_img_points,
+        ds_left, ds_right,
+        R_stereo_avg, T_stereo_avg,
+        img1.size(), rectified_size,
+        camera_extrinsics_left, camera_extrinsics_right,
+        avg_rectification_err, max_rectification_err
+    );
+    
+    printf("   Evaluated %d corner points\n", num_rect_points);
+    printf("   Average y-difference: %.4f pixels [threshold: < 0.3 pixel]\n", avg_rectification_err);
+    printf("   Maximum y-difference: %.4f pixels [threshold: < 0.7 pixel]\n", max_rectification_err);
+    printf("   Status: %s\n", 
+           (avg_rectification_err < 0.3 && max_rectification_err < 0.7) ? "PASS" : "FAIL");
     fflush(stdout);
     
     // 5. Baseline Distance
@@ -980,6 +1041,8 @@ int main(int argc, char const *argv[])
     fs << "monocular_reprojection_error_avg" << avg_monocular_err;
     fs << "stereo_reprojection_error_avg" << avg_stereo_err;
     fs << "stereo_reprojection_error_max" << max_stereo_err;
+    fs << "rectification_error_avg" << avg_rectification_err;
+    fs << "rectification_error_max" << max_rectification_err;
     fs << "calibrated_baseline" << calibrated_baseline;
     if (physical_baseline > 0) {
         fs << "physical_baseline" << physical_baseline;
