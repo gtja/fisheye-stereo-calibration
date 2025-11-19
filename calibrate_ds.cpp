@@ -639,9 +639,13 @@ int main(int argc, char const *argv[])
                 fisheye_success = true;
                 printf("KB4 fisheye calibration succeeded for left camera\n");
                 fflush(stdout);
+                printf("[DEBUG] About to set K2_kb4 = K1_kb4\n");
+                fflush(stdout);
                 // Set right camera parameters to left for consistency (won't be used)
                 K2_kb4 = K1_kb4;
                 D2_kb4 = D1_kb4;
+                printf("[DEBUG] Successfully set K2_kb4 and D2_kb4\n");
+                fflush(stdout);
             } catch (const cv::Exception& e) {
                 printf("Fisheye model failed for left camera: %s\n", e.what());
                 fflush(stdout);
@@ -798,6 +802,9 @@ int main(int argc, char const *argv[])
         }
     }
     
+    printf("[DEBUG] Reached line 801, fisheye_success = %d\n", fisheye_success);
+    fflush(stdout);
+    
     if (fisheye_success) {
         printf("KB4 calibration complete\n");
         fflush(stdout);
@@ -805,6 +812,10 @@ int main(int argc, char const *argv[])
         printf("Initial calibration complete (using omnidir model)\n");
         fflush(stdout);
     }
+    
+    printf("[DEBUG] About to print camera parameters\n");
+    fflush(stdout);
+    
     if (is_left_only || !mono_mode) {
         printf("  Left camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n", 
                K1_kb4(0,0), K1_kb4(1,1), K1_kb4(0,2), K1_kb4(1,2));
@@ -815,9 +826,21 @@ int main(int argc, char const *argv[])
     }
     fflush(stdout);
     
+    printf("[DEBUG] Finished printing camera parameters\n");
+    fflush(stdout);
+    
     // Create KB4 parameters
+    printf("[DEBUG] Creating KB4 parameters\n");
+    fflush(stdout);
     kb4::KB4Params kb4_left(K1_kb4, D1_kb4);
+    printf("[DEBUG] Created kb4_left\n");
+    fflush(stdout);
     kb4::KB4Params kb4_right(K2_kb4, D2_kb4);
+    printf("[DEBUG] Created kb4_right\n");
+    fflush(stdout);
+    
+    printf("[DEBUG] mono_mode = %d, is_left_only = %d, is_right_only = %d\n", mono_mode, is_left_only, is_right_only);
+    fflush(stdout);
     
     // In mono mode, we skip the rest and save just the intrinsics
     if (mono_mode) {
