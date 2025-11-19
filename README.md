@@ -186,6 +186,7 @@ Both calibration programs (`calibrate` and `calibrate_ds`) automatically evaluat
 4. **Stereo Rectification Error**: The average y-coordinate difference for corresponding points after rectification
    - Target threshold: < 0.3 pixels (average)
    - Target threshold: < 0.7 pixels (maximum)
+   - **Note**: For wide-angle fisheye lenses (FOV > 130°), partial rectification is automatically applied to prevent points from going behind the camera. See [WIDE_ANGLE_RECTIFICATION_FIX.md](WIDE_ANGLE_RECTIFICATION_FIX.md) for details.
 
 5. **Baseline Distance**: Comparison between the calibrated baseline and physical baseline (if provided)
    - Target threshold: < 1 mm difference
@@ -200,5 +201,6 @@ The calibration code has been enhanced with several improvements for better accu
 - **Optimized rectification**: Uses alpha=0.8 (recommended 0.7-0.8) for better valid pixel retention
 - **All 4 distortion coefficients**: k1-k4 enabled for fisheye lenses (critical for edge accuracy)
 - **Principal point optimization**: Not fixed to image center (important for wide-angle lenses)
+- **🆕 Wide-angle rectification fix**: Automatic partial rectification and adaptive scaling for wide-angle fisheye lenses (FOV > 130°) to ensure rectification error can be evaluated. See [WIDE_ANGLE_RECTIFICATION_FIX.md](WIDE_ANGLE_RECTIFICATION_FIX.md).
 
 See [CALIBRATION_GUIDE.md](CALIBRATION_GUIDE.md) for detailed explanations and additional optimization techniques.
