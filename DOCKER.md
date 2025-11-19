@@ -271,7 +271,7 @@ docker run \
 - `RUN_QUALITY_CHECKS`: Enable automatic quality checks (default: true)
 - `BLUR_THRESHOLD`: Laplacian variance threshold for blur detection (default: 100)
 - `CALIBRATION_MODEL`: Calibration model to use: "standard" or "double_sphere" (default: standard)
-- `CALIBRATION_WORKFLOW`: Calibration workflow: "traditional" or "hand_eye" (default: traditional)
+- `CALIBRATION_WORKFLOW`: Calibration workflow: "traditional" or "hand_eye" (default: hand_eye)
 
 ### Custom Parameters via Command Line
 
