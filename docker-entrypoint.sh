@@ -207,21 +207,23 @@ run_quality_checks() {
 if [ $# -gt 0 ]; then
     echo "Running calibration with custom arguments: $@"
     
+    # Parse arguments to extract necessary parameters
+    args=("$@")
+    for i in "${!args[@]}"; do
+        case "${args[$i]}" in
+            -w) BOARD_WIDTH="${args[$((i+1))]}" ;;
+            -h) BOARD_HEIGHT="${args[$((i+1))]}" ;;
+            -s) SQUARE_SIZE="${args[$((i+1))]}" ;;
+            -d) IMG_DIR="${args[$((i+1))]}" ;;
+            -l) LEFT_PREFIX="${args[$((i+1))]}" ;;
+            -r) RIGHT_PREFIX="${args[$((i+1))]}" ;;
+            -e) IMAGE_EXTENSION="${args[$((i+1))]}" ;;
+            -o) OUTPUT_FILE="${args[$((i+1))]}" ;;
+        esac
+    done
+    
     # Check if quality checks should be run
     if [ "$RUN_QUALITY_CHECKS" = "true" ]; then
-        # Parse arguments to extract necessary parameters for quality checks
-        args=("$@")
-        for i in "${!args[@]}"; do
-            case "${args[$i]}" in
-                -w) BOARD_WIDTH="${args[$((i+1))]}" ;;
-                -h) BOARD_HEIGHT="${args[$((i+1))]}" ;;
-                -d) IMG_DIR="${args[$((i+1))]}" ;;
-                -l) LEFT_PREFIX="${args[$((i+1))]}" ;;
-                -r) RIGHT_PREFIX="${args[$((i+1))]}" ;;
-                -e) IMAGE_EXTENSION="${args[$((i+1))]}" ;;
-            esac
-        done
-        
         # Run quality checks before calibration
         # This removes invalid images from the directory, so calibration will only find valid ones
         run_quality_checks
@@ -259,7 +261,12 @@ if [ $# -gt 0 ]; then
                 fi
             done
         fi
-        
+    fi
+    
+    # Check if hand-eye workflow should be used
+    if [ "$CALIBRATION_WORKFLOW" = "hand_eye" ]; then
+        run_hand_eye_workflow
+    else
         echo ""
         echo "╔════════════════════════════════════════════════════════════════════════════╗"
         if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
@@ -269,14 +276,21 @@ if [ $# -gt 0 ]; then
         fi
         echo "╚════════════════════════════════════════════════════════════════════════════╝"
         echo ""
-        if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
-            echo "Command: ./calibrate_ds ${args[@]}"
-            exec ./calibrate_ds "${args[@]}"
+        
+        if [ "$RUN_QUALITY_CHECKS" = "true" ]; then
+            if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+                echo "Command: ./calibrate_ds ${args[@]}"
+                exec ./calibrate_ds "${args[@]}"
+            else
+                exec ./calibrate "${args[@]}"
+            fi
         else
-            exec ./calibrate "${args[@]}"
+            if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+                exec ./calibrate_ds "$@"
+            else
+                exec ./calibrate "$@"
+            fi
         fi
-    else
-        exec ./calibrate "$@"
     fi
 else
     # Use environment variables
