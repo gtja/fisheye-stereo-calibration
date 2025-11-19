@@ -487,11 +487,7 @@ inline int calculateRectificationError(
         R_rect_left.at<double>(2, i) = e3.at<double>(i);
     }
     
-    // Debug: print rectification axes
-    std::cout << "Debug rectification:" << std::endl;
-    std::cout << "  e1 (X, baseline): [" << e1.at<double>(0) << ", " << e1.at<double>(1) << ", " << e1.at<double>(2) << "]" << std::endl;
-    std::cout << "  e2 (Y): [" << e2.at<double>(0) << ", " << e2.at<double>(1) << ", " << e2.at<double>(2) << "]" << std::endl;
-    std::cout << "  e3 (Z, forward): [" << e3.at<double>(0) << ", " << e3.at<double>(1) << ", " << e3.at<double>(2) << "]" << std::endl;
+
     
     // Rectification rotation for right camera
     cv::Mat R_rect_right = R_rect_left * R;
@@ -500,14 +496,8 @@ inline int calculateRectificationError(
     VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height);
     
     // For each 3D point, project through both cameras and measure rectification error
-    int total_tested = 0;
-    int points_behind_camera = 0;
-    int points_outside_bounds = 0;
-    
     for (size_t i = 0; i < object_points.size(); i++) {
         for (size_t j = 0; j < object_points[i].size(); j++) {
-            total_tested++;
-            
             // Transform 3D point to left camera coordinates using optimized extrinsics
             double point_world[3] = {object_points[i][j].x, object_points[i][j].y, object_points[i][j].z};
             double point_camera_left[3];
@@ -525,7 +515,6 @@ inline int calculateRectificationError(
             
             // Skip points behind camera
             if (point_camera_left[2] <= 0 || point_camera_right[2] <= 0) {
-                points_behind_camera++;
                 continue;
             }
             
@@ -538,14 +527,7 @@ inline int calculateRectificationError(
             cv::Mat pt_left_rect = R_rect_left * pt_left_cam;
             cv::Mat pt_right_rect = R_rect_right * pt_right_cam;
             
-            // Debug first point
-            if (i == 0 && j == 0) {
-                std::cout << "Debug first point:" << std::endl;
-                std::cout << "  pt_left_cam z=" << point_camera_left[2] << std::endl;
-                std::cout << "  pt_left_rect z=" << pt_left_rect.at<double>(2) << std::endl;
-                std::cout << "  pt_right_rect z=" << pt_right_rect.at<double>(2) << std::endl;
-            }
-            
+
             // Project to virtual pinhole image
             if (pt_left_rect.at<double>(2) > 0 && pt_right_rect.at<double>(2) > 0) {
                 double u_left = virtual_cam.fx * (pt_left_rect.at<double>(0) / pt_left_rect.at<double>(2)) + virtual_cam.cx;
@@ -569,19 +551,12 @@ inline int calculateRectificationError(
                         max_error = y_diff;
                     }
                     valid_points++;
-                } else {
-                    points_outside_bounds++;
                 }
             }
         }
     }
     
-    if (total_tested > 0) {
-        std::cout << "Debug: Total tested=" << total_tested 
-                  << ", behind_camera=" << points_behind_camera
-                  << ", outside_bounds=" << points_outside_bounds
-                  << ", valid=" << valid_points << std::endl;
-    }
+
     
     if (valid_points > 0) {
         avg_error /= valid_points;

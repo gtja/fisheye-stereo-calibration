@@ -915,10 +915,17 @@ int main(int argc, char const *argv[])
         T_stereo_list.push_back(T_stereo);
     }
     
-    // Use the stereo transformation from the first frame (or could average them)
-    // For simplicity, we'll use the transformation from KB4 calibration (R_kb4, T_kb4)
+    // Compute average stereo transformation from optimized extrinsics
+    // Average the translation vectors
+    cv::Mat T_stereo_sum = cv::Mat::zeros(3, 1, CV_64F);
+    for (const auto& T : T_stereo_list) {
+        T_stereo_sum += T;
+    }
+    cv::Mat T_stereo_avg = T_stereo_sum / static_cast<double>(T_stereo_list.size());
+    
+    // For rotation, use the median or first transformation (averaging rotations is non-trivial)
+    // Using KB4 as a good stable reference
     cv::Mat R_stereo_avg = cv::Mat(R_kb4);
-    cv::Mat T_stereo_avg = cv::Mat(T_kb4);
     
     double avg_rectification_err = 0.0;
     double max_rectification_err = 0.0;
