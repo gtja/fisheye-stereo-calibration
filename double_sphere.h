@@ -979,6 +979,91 @@ inline int calculateRectificationError(
     return valid_points;
 }
 
+// Hand-Eye Calibration (AX=XB solver)
+// Given two sets of poses (e.g., board poses seen by left and right cameras),
+// solves for the transformation between the two coordinate frames
+// Reference: "Robot Sensor Calibration: Solving AX=XB on the Euclidean Group" by Tsai & Lenz
+inline bool solveHandEyeCalibration(const std::vector<cv::Mat>& A_rotations,
+                                    const std::vector<cv::Mat>& A_translations,
+                                    const std::vector<cv::Mat>& B_rotations,
+                                    const std::vector<cv::Mat>& B_translations,
+                                    cv::Mat& X_rotation,
+                                    cv::Mat& X_translation) {
+    // A: transformations from world to left camera
+    // B: transformations from world to right camera
+    // X: transformation from left camera to right camera
+    // We want to solve: A_i * X = X * B_i for all i
+    
+    size_t n = A_rotations.size();
+    if (n < 2 || n != B_rotations.size() || n != A_translations.size() || n != B_translations.size()) {
+        std::cerr << "Error: Need at least 2 pose pairs for hand-eye calibration" << std::endl;
+        return false;
+    }
+    
+    // Use OpenCV's calibrateHandEye function (available in OpenCV 3.3+)
+    // This implements the Tsai-Lenz algorithm
+    std::vector<cv::Mat> R_gripper2base, t_gripper2base;  // A matrices
+    std::vector<cv::Mat> R_target2cam, t_target2cam;      // B matrices
+    
+    // Prepare inputs for calibrateHandEye
+    // We need to convert from world->camera transforms to relative transforms
+    for (size_t i = 0; i < n - 1; i++) {
+        // Compute relative transformations between consecutive poses
+        // A_rel = A[i+1] * A[i]^{-1}
+        cv::Mat R_A_rel = A_rotations[i+1] * A_rotations[i].t();
+        cv::Mat t_A_rel = A_translations[i+1] - R_A_rel * A_translations[i];
+        
+        // B_rel = B[i+1] * B[i]^{-1}
+        cv::Mat R_B_rel = B_rotations[i+1] * B_rotations[i].t();
+        cv::Mat t_B_rel = B_translations[i+1] - R_B_rel * B_translations[i];
+        
+        R_gripper2base.push_back(R_A_rel);
+        t_gripper2base.push_back(t_A_rel);
+        R_target2cam.push_back(R_B_rel);
+        t_target2cam.push_back(t_B_rel);
+    }
+    
+    try {
+        cv::calibrateHandEye(R_gripper2base, t_gripper2base,
+                            R_target2cam, t_target2cam,
+                            X_rotation, X_translation,
+                            cv::CALIB_HAND_EYE_TSAI);
+        return true;
+    } catch (const cv::Exception& e) {
+        std::cerr << "Error in hand-eye calibration: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+// Simple version that takes rotation vectors instead of matrices
+inline bool solveHandEyeCalibration(const std::vector<cv::Vec3d>& A_rvecs,
+                                    const std::vector<cv::Vec3d>& A_tvecs,
+                                    const std::vector<cv::Vec3d>& B_rvecs,
+                                    const std::vector<cv::Vec3d>& B_tvecs,
+                                    cv::Mat& X_rotation,
+                                    cv::Mat& X_translation) {
+    std::vector<cv::Mat> A_rotations, A_translations;
+    std::vector<cv::Mat> B_rotations, B_translations;
+    
+    for (size_t i = 0; i < A_rvecs.size(); i++) {
+        cv::Mat R_A, R_B;
+        cv::Rodrigues(A_rvecs[i], R_A);
+        cv::Rodrigues(B_rvecs[i], R_B);
+        
+        cv::Mat t_A = (cv::Mat_<double>(3, 1) << A_tvecs[i][0], A_tvecs[i][1], A_tvecs[i][2]);
+        cv::Mat t_B = (cv::Mat_<double>(3, 1) << B_tvecs[i][0], B_tvecs[i][1], B_tvecs[i][2]);
+        
+        A_rotations.push_back(R_A);
+        A_translations.push_back(t_A);
+        B_rotations.push_back(R_B);
+        B_translations.push_back(t_B);
+    }
+    
+    return solveHandEyeCalibration(A_rotations, A_translations,
+                                   B_rotations, B_translations,
+                                   X_rotation, X_translation);
+}
+
 } // namespace double_sphere
 
 #endif // DOUBLE_SPHERE_H

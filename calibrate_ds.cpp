@@ -469,17 +469,54 @@ int main(int argc, char const *argv[])
     flag |= fisheye::CALIB_RECOMPUTE_EXTRINSIC;
     flag |= fisheye::CALIB_FIX_SKEW;
     
-    printf("Attempting fisheye::stereoCalibrate with %zu image pairs...\n", obj_pts_init.size());
-    fflush(stdout);
-    
     bool fisheye_success = false;
-    try {
-        fisheye::stereoCalibrate(obj_pts_init, left_pts_init, right_pts_init,
-                                K1_kb4, D1_kb4, K2_kb4, D2_kb4, img1.size(), R_kb4, T_kb4, flag,
-                                TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
-        fisheye_success = true;
-        printf("KB4 fisheye calibration succeeded\n");
-    } catch (const cv::Exception& e) {
+    
+    if (mono_mode) {
+        // Monocular calibration
+        if (is_left_only) {
+            printf("Attempting fisheye::calibrate for left camera with %zu images...\n", obj_pts_init.size());
+            fflush(stdout);
+            try {
+                vector<Vec3d> rvecs, tvecs;
+                fisheye::calibrate(obj_pts_init, left_pts_init, img1.size(),
+                                  K1_kb4, D1_kb4, rvecs, tvecs, flag,
+                                  TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
+                fisheye_success = true;
+                printf("KB4 fisheye calibration succeeded for left camera\n");
+                // Set right camera parameters to left for consistency (won't be used)
+                K2_kb4 = K1_kb4;
+                D2_kb4 = D1_kb4;
+            } catch (const cv::Exception& e) {
+                printf("Fisheye model failed for left camera: %s\n", e.what());
+            }
+        } else {  // is_right_only
+            printf("Attempting fisheye::calibrate for right camera with %zu images...\n", obj_pts_init.size());
+            fflush(stdout);
+            try {
+                vector<Vec3d> rvecs, tvecs;
+                fisheye::calibrate(obj_pts_init, right_pts_init, img2.size(),
+                                  K2_kb4, D2_kb4, rvecs, tvecs, flag,
+                                  TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
+                fisheye_success = true;
+                printf("KB4 fisheye calibration succeeded for right camera\n");
+                // Set left camera parameters to right for consistency (won't be used)
+                K1_kb4 = K2_kb4;
+                D1_kb4 = D2_kb4;
+            } catch (const cv::Exception& e) {
+                printf("Fisheye model failed for right camera: %s\n", e.what());
+            }
+        }
+    } else {
+        // Stereo calibration
+        printf("Attempting fisheye::stereoCalibrate with %zu image pairs...\n", obj_pts_init.size());
+        fflush(stdout);
+        try {
+            fisheye::stereoCalibrate(obj_pts_init, left_pts_init, right_pts_init,
+                                    K1_kb4, D1_kb4, K2_kb4, D2_kb4, img1.size(), R_kb4, T_kb4, flag,
+                                    TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
+            fisheye_success = true;
+            printf("KB4 fisheye calibration succeeded\n");
+        } catch (const cv::Exception& e) {
         printf("Fisheye model failed (expected for FOV > 200°): %s\n", e.what());
         printf("Falling back to omnidir (MEI) model for initial calibration...\n");
         fflush(stdout);
@@ -497,14 +534,24 @@ int main(int argc, char const *argv[])
             obj_pts_init_f.push_back(obj_f);
         }
         
-        for (size_t i = 0; i < left_pts_init.size(); i++) {
-            vector<Point2f> v1, v2;
-            for (size_t j = 0; j < left_pts_init[i].size(); j++) {
-                v1.push_back(Point2f((float)left_pts_init[i][j].x, (float)left_pts_init[i][j].y));
-                v2.push_back(Point2f((float)right_pts_init[i][j].x, (float)right_pts_init[i][j].y));
+        if (!mono_mode || is_left_only) {
+            for (size_t i = 0; i < left_pts_init.size(); i++) {
+                vector<Point2f> v1;
+                for (size_t j = 0; j < left_pts_init[i].size(); j++) {
+                    v1.push_back(Point2f((float)left_pts_init[i][j].x, (float)left_pts_init[i][j].y));
+                }
+                left_pts_init_f.push_back(v1);
             }
-            left_pts_init_f.push_back(v1);
-            right_pts_init_f.push_back(v2);
+        }
+        
+        if (!mono_mode || is_right_only) {
+            for (size_t i = 0; i < right_pts_init.size(); i++) {
+                vector<Point2f> v2;
+                for (size_t j = 0; j < right_pts_init[i].size(); j++) {
+                    v2.push_back(Point2f((float)right_pts_init[i][j].x, (float)right_pts_init[i][j].y));
+                }
+                right_pts_init_f.push_back(v2);
+            }
         }
         
         Mat K1_mat, K2_mat, D1_mat, D2_mat, xi1_mat, xi2_mat, R_mat, T_mat;
@@ -514,56 +561,70 @@ int main(int argc, char const *argv[])
         omni_flags |= omnidir::CALIB_FIX_SKEW;
         
         try {
-            // Calibrate left camera first
-            printf("  Calibrating left camera with omnidir...\n");
-            fflush(stdout);
-            double rms_left = omnidir::calibrate(obj_pts_init_f, left_pts_init_f, img1.size(),
-                                                 K1_mat, xi1_mat, D1_mat, rvecs_left, tvecs_left,
-                                                 omni_flags,
-                                                 TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
-            printf("  Left camera RMS: %.4f\n", rms_left);
+            if (!mono_mode || is_left_only) {
+                // Calibrate left camera
+                printf("  Calibrating left camera with omnidir...\n");
+                fflush(stdout);
+                double rms_left = omnidir::calibrate(obj_pts_init_f, left_pts_init_f, 
+                                                     is_left_only ? img1.size() : img1.size(),
+                                                     K1_mat, xi1_mat, D1_mat, rvecs_left, tvecs_left,
+                                                     omni_flags,
+                                                     TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
+                printf("  Left camera RMS: %.4f\n", rms_left);
+            }
             
-            // Calibrate right camera
-            printf("  Calibrating right camera with omnidir...\n");
-            fflush(stdout);
-            double rms_right = omnidir::calibrate(obj_pts_init_f, right_pts_init_f, img2.size(),
-                                                  K2_mat, xi2_mat, D2_mat, rvecs_right, tvecs_right,
-                                                  omni_flags,
-                                                  TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
-            printf("  Right camera RMS: %.4f\n", rms_right);
+            if (!mono_mode || is_right_only) {
+                // Calibrate right camera
+                printf("  Calibrating right camera with omnidir...\n");
+                fflush(stdout);
+                double rms_right = omnidir::calibrate(obj_pts_init_f, right_pts_init_f,
+                                                      is_right_only ? img2.size() : img2.size(),
+                                                      K2_mat, xi2_mat, D2_mat, rvecs_right, tvecs_right,
+                                                      omni_flags,
+                                                      TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
+                printf("  Right camera RMS: %.4f\n", rms_right);
+            }
             
-            // Stereo calibration with omnidir
-            printf("  Performing stereo calibration with omnidir...\n");
-            fflush(stdout);
-            Mat rvec_stereo, tvec_stereo;
-            double rms_stereo = omnidir::stereoCalibrate(obj_pts_init_f, left_pts_init_f, right_pts_init_f,
-                                                         img1.size(), img2.size(),
-                                                         K1_mat, xi1_mat, D1_mat,
-                                                         K2_mat, xi2_mat, D2_mat,
-                                                         rvec_stereo, tvec_stereo, rvecs_left, tvecs_left,
-                                                         omni_flags | omnidir::CALIB_USE_GUESS,
-                                                         TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
-            printf("  Stereo calibration RMS: %.4f\n", rms_stereo);
+            if (!mono_mode) {
+                // Stereo calibration with omnidir
+                printf("  Performing stereo calibration with omnidir...\n");
+                fflush(stdout);
+                Mat rvec_stereo, tvec_stereo;
+                double rms_stereo = omnidir::stereoCalibrate(obj_pts_init_f, left_pts_init_f, right_pts_init_f,
+                                                             img1.size(), img2.size(),
+                                                             K1_mat, xi1_mat, D1_mat,
+                                                             K2_mat, xi2_mat, D2_mat,
+                                                             rvec_stereo, tvec_stereo, rvecs_left, tvecs_left,
+                                                             omni_flags | omnidir::CALIB_USE_GUESS,
+                                                             TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
+                printf("  Stereo calibration RMS: %.4f\n", rms_stereo);
+                
+                // Convert rotation vector to rotation matrix
+                Rodrigues(rvec_stereo, R_mat);
+                R_kb4 = Matx33d((double*)R_mat.data);
+                T_kb4 = Vec3d(tvec_stereo.at<double>(0), tvec_stereo.at<double>(1), tvec_stereo.at<double>(2));
+            }
             
             // Convert omnidir results to KB4 format
             // Extract intrinsics
-            K1_kb4 = Matx33d((double*)K1_mat.data);
-            K2_kb4 = Matx33d((double*)K2_mat.data);
-            
-            // Extract first 4 distortion coefficients (omnidir has more, but KB4 uses 4)
-            D1_kb4 = Vec4d(D1_mat.at<double>(0), D1_mat.at<double>(1), 
-                          D1_mat.at<double>(2), D1_mat.at<double>(3));
-            D2_kb4 = Vec4d(D2_mat.at<double>(0), D2_mat.at<double>(1), 
-                          D2_mat.at<double>(2), D2_mat.at<double>(3));
-            
-            // Convert rotation vector to rotation matrix
-            Rodrigues(rvec_stereo, R_mat);
-            R_kb4 = Matx33d((double*)R_mat.data);
-            T_kb4 = Vec3d(tvec_stereo.at<double>(0), tvec_stereo.at<double>(1), tvec_stereo.at<double>(2));
+            if (is_left_only || !mono_mode) {
+                K1_kb4 = Matx33d((double*)K1_mat.data);
+                D1_kb4 = Vec4d(D1_mat.at<double>(0), D1_mat.at<double>(1), 
+                              D1_mat.at<double>(2), D1_mat.at<double>(3));
+            }
+            if (is_right_only || !mono_mode) {
+                K2_kb4 = Matx33d((double*)K2_mat.data);
+                D2_kb4 = Vec4d(D2_mat.at<double>(0), D2_mat.at<double>(1), 
+                              D2_mat.at<double>(2), D2_mat.at<double>(3));
+            }
             
             printf("Omnidir calibration succeeded as fallback\n");
-            printf("  Mirror parameters: xi1=%.6f, xi2=%.6f\n", 
-                   xi1_mat.at<double>(0), xi2_mat.at<double>(0));
+            if (!mono_mode || is_left_only) {
+                printf("  Left mirror parameter: xi1=%.6f\n", xi1_mat.at<double>(0));
+            }
+            if (!mono_mode || is_right_only) {
+                printf("  Right mirror parameter: xi2=%.6f\n", xi2_mat.at<double>(0));
+            }
             
         } catch (const cv::Exception& e2) {
             cerr << "Error: Both fisheye and omnidir calibration failed!" << endl;
@@ -583,15 +644,78 @@ int main(int argc, char const *argv[])
     } else {
         printf("Initial calibration complete (using omnidir model)\n");
     }
-    printf("  Left camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n", 
-           K1_kb4(0,0), K1_kb4(1,1), K1_kb4(0,2), K1_kb4(1,2));
-    printf("  Right camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n",
-           K2_kb4(0,0), K2_kb4(1,1), K2_kb4(0,2), K2_kb4(1,2));
+    if (is_left_only || !mono_mode) {
+        printf("  Left camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n", 
+               K1_kb4(0,0), K1_kb4(1,1), K1_kb4(0,2), K1_kb4(1,2));
+    }
+    if (is_right_only || !mono_mode) {
+        printf("  Right camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n",
+               K2_kb4(0,0), K2_kb4(1,1), K2_kb4(0,2), K2_kb4(1,2));
+    }
     fflush(stdout);
     
     // Create KB4 parameters
     kb4::KB4Params kb4_left(K1_kb4, D1_kb4);
     kb4::KB4Params kb4_right(K2_kb4, D2_kb4);
+    
+    // In mono mode, we skip the rest and save just the intrinsics
+    if (mono_mode) {
+        printf("\nMono calibration complete. Saving results to %s...\n", 
+               out_file ? out_file : (is_left_only ? "left_ds.yml" : "right_ds.yml"));
+        fflush(stdout);
+        
+        const char* output_file = out_file ? out_file : (is_left_only ? "left_ds.yml" : "right_ds.yml");
+        
+        // Initialize DS parameters from KB4
+        double_sphere::DoubleSphereParams ds_params;
+        if (is_left_only) {
+            ds_params.fx = kb4_left.fx;
+            ds_params.fy = kb4_left.fy;
+            ds_params.cx = kb4_left.cx;
+            ds_params.cy = kb4_left.cy;
+            ds_params.k1 = kb4_left.k1;
+            ds_params.k2 = kb4_left.k2;
+            ds_params.k3 = kb4_left.k3;
+            ds_params.k4 = kb4_left.k4;
+        } else {
+            ds_params.fx = kb4_right.fx;
+            ds_params.fy = kb4_right.fy;
+            ds_params.cx = kb4_right.cx;
+            ds_params.cy = kb4_right.cy;
+            ds_params.k1 = kb4_right.k1;
+            ds_params.k2 = kb4_right.k2;
+            ds_params.k3 = kb4_right.k3;
+            ds_params.k4 = kb4_right.k4;
+        }
+        ds_params.xi = 0.0;      // Initial guess
+        ds_params.alpha = 0.5;   // Initial guess
+        ds_params.k5 = 0.0;
+        ds_params.k6 = 0.0;
+        
+        FileStorage fs(output_file, FileStorage::WRITE);
+        fs << "model_type" << "double_sphere";
+        fs << "camera" << "{";
+        fs << "fx" << ds_params.fx;
+        fs << "fy" << ds_params.fy;
+        fs << "cx" << ds_params.cx;
+        fs << "cy" << ds_params.cy;
+        fs << "xi" << ds_params.xi;
+        fs << "alpha" << ds_params.alpha;
+        fs << "k1" << ds_params.k1;
+        fs << "k2" << ds_params.k2;
+        fs << "k3" << ds_params.k3;
+        fs << "k4" << ds_params.k4;
+        fs << "k5" << ds_params.k5;
+        fs << "k6" << ds_params.k6;
+        fs << "}";
+        fs.release();
+        
+        printf("Mono calibration saved successfully to %s\n", output_file);
+        printf("Note: For better accuracy, run Bundle Adjustment with full DS model\n");
+        fflush(stdout);
+        
+        return 0;
+    }
     
     // Step 2: Load image points with SE(3) pre-correction
     printf("\nStep 2: Corner detection with SE(3) pre-correction...\n");
