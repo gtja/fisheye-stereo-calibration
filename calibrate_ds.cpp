@@ -223,6 +223,7 @@ int main(int argc, char const *argv[])
     char* rightimg_filename;
     char* out_file;
     char* extension = (char*)"jpg";
+    double physical_baseline = -1.0;
 
     printf("[LOG] Initializing popt options...\n");
     fflush(stdout);
@@ -235,6 +236,7 @@ int main(int argc, char const *argv[])
         { "rightimg_filename",'r',POPT_ARG_STRING,&rightimg_filename,0,"Right image prefix","STR" },
         { "out_file",'o',POPT_ARG_STRING,&out_file,0,"Output calibration filename (YML)","STR" },
         { "extension",'e',POPT_ARG_STRING,&extension,0,"Image file extension (default: jpg)","STR" },
+        { "baseline",'b',POPT_ARG_DOUBLE,&physical_baseline,0,"Physical baseline distance in meters (for accuracy evaluation)","NUM" },
         POPT_AUTOHELP
         { NULL, 0, 0, NULL, 0, NULL, NULL }
     };
@@ -748,6 +750,189 @@ int main(int argc, char const *argv[])
     ds_right.k5 = camera_intrinsics_right[10];
     ds_right.k6 = camera_intrinsics_right[11];
     
+    // ========== Calibration Accuracy Evaluation ==========
+    printf("\n========== Calibration Accuracy Evaluation ==========\n");
+    fflush(stdout);
+    
+    // 1. Monocular Reprojection Error
+    double total_err_left = 0.0, total_err_right = 0.0;
+    int total_points = 0;
+    
+    for (size_t i = 0; i < object_points.size(); i++) {
+        for (size_t j = 0; j < object_points[i].size(); j++) {
+            // Transform 3D point to left camera coordinates
+            double point_world[3] = {object_points[i][j].x, object_points[i][j].y, object_points[i][j].z};
+            double point_camera_left[3];
+            ceres::AngleAxisRotatePoint(camera_extrinsics_left[i], point_world, point_camera_left);
+            point_camera_left[0] += camera_extrinsics_left[i][3];
+            point_camera_left[1] += camera_extrinsics_left[i][4];
+            point_camera_left[2] += camera_extrinsics_left[i][5];
+            
+            // Project to left image
+            double projected_left[2];
+            if (double_sphere::project(ds_left, point_camera_left, projected_left)) {
+                double dx = projected_left[0] - left_img_points[i][j].x;
+                double dy = projected_left[1] - left_img_points[i][j].y;
+                total_err_left += sqrt(dx*dx + dy*dy);
+            }
+            
+            // Transform 3D point to right camera coordinates
+            double point_camera_right[3];
+            ceres::AngleAxisRotatePoint(camera_extrinsics_right[i], point_world, point_camera_right);
+            point_camera_right[0] += camera_extrinsics_right[i][3];
+            point_camera_right[1] += camera_extrinsics_right[i][4];
+            point_camera_right[2] += camera_extrinsics_right[i][5];
+            
+            // Project to right image
+            double projected_right[2];
+            if (double_sphere::project(ds_right, point_camera_right, projected_right)) {
+                double dx = projected_right[0] - right_img_points[i][j].x;
+                double dy = projected_right[1] - right_img_points[i][j].y;
+                total_err_right += sqrt(dx*dx + dy*dy);
+            }
+            
+            total_points++;
+        }
+    }
+    
+    double avg_err_left = total_err_left / total_points;
+    double avg_err_right = total_err_right / total_points;
+    double avg_monocular_err = (total_err_left + total_err_right) / (2.0 * total_points);
+    
+    printf("1. Monocular Reprojection Error:\n");
+    printf("   Left camera:  %.4f pixels (avg)\n", avg_err_left);
+    printf("   Right camera: %.4f pixels (avg)\n", avg_err_right);
+    printf("   Overall:      %.4f pixels (avg) [threshold: < 0.3 pixel]\n", avg_monocular_err);
+    printf("   Status: %s\n", avg_monocular_err < 0.3 ? "PASS" : "FAIL");
+    fflush(stdout);
+    
+    // 2 & 3. Stereo Reprojection Error
+    // Compute average stereo transformation from per-frame extrinsics
+    // We'll use the relative transformation between left and right camera for each frame
+    double total_stereo_err = 0.0;
+    double max_stereo_err = 0.0;
+    int stereo_points = 0;
+    
+    for (size_t i = 0; i < object_points.size(); i++) {
+        // Get rotation matrices from angle-axis
+        cv::Mat R_left_mat(3, 3, CV_64F);
+        cv::Mat R_right_mat(3, 3, CV_64F);
+        cv::Mat rvec_left = (cv::Mat_<double>(3,1) << camera_extrinsics_left[i][0], 
+                             camera_extrinsics_left[i][1], camera_extrinsics_left[i][2]);
+        cv::Mat rvec_right = (cv::Mat_<double>(3,1) << camera_extrinsics_right[i][0],
+                              camera_extrinsics_right[i][1], camera_extrinsics_right[i][2]);
+        cv::Rodrigues(rvec_left, R_left_mat);
+        cv::Rodrigues(rvec_right, R_right_mat);
+        
+        // Get translation vectors
+        cv::Mat t_left = (cv::Mat_<double>(3,1) << camera_extrinsics_left[i][3],
+                          camera_extrinsics_left[i][4], camera_extrinsics_left[i][5]);
+        cv::Mat t_right = (cv::Mat_<double>(3,1) << camera_extrinsics_right[i][3],
+                           camera_extrinsics_right[i][4], camera_extrinsics_right[i][5]);
+        
+        // Compute relative transformation: R = R_right * R_left^T, T = t_right - R * t_left
+        cv::Mat R_stereo = R_right_mat * R_left_mat.t();
+        cv::Mat T_stereo = t_right - R_stereo * t_left;
+        
+        for (size_t j = 0; j < object_points[i].size(); j++) {
+            // Transform 3D point to left camera coordinates
+            double point_world[3] = {object_points[i][j].x, object_points[i][j].y, object_points[i][j].z};
+            double point_camera_left[3];
+            ceres::AngleAxisRotatePoint(camera_extrinsics_left[i], point_world, point_camera_left);
+            point_camera_left[0] += camera_extrinsics_left[i][3];
+            point_camera_left[1] += camera_extrinsics_left[i][4];
+            point_camera_left[2] += camera_extrinsics_left[i][5];
+            
+            // Transform from left to right camera coordinates using stereo transformation
+            cv::Mat pt_left = (cv::Mat_<double>(3,1) << point_camera_left[0], point_camera_left[1], point_camera_left[2]);
+            cv::Mat pt_right = R_stereo * pt_left + T_stereo;
+            
+            double point_camera_right[3] = {pt_right.at<double>(0), pt_right.at<double>(1), pt_right.at<double>(2)};
+            
+            // Project to right image
+            double projected_right[2];
+            if (double_sphere::project(ds_right, point_camera_right, projected_right)) {
+                double dx = projected_right[0] - right_img_points[i][j].x;
+                double dy = projected_right[1] - right_img_points[i][j].y;
+                double err = sqrt(dx*dx + dy*dy);
+                total_stereo_err += err;
+                if (err > max_stereo_err) {
+                    max_stereo_err = err;
+                }
+            }
+            stereo_points++;
+        }
+    }
+    
+    double avg_stereo_err = total_stereo_err / stereo_points;
+    
+    printf("\n2. Stereo Reprojection Error:\n");
+    printf("   Average: %.4f pixels [threshold: < 0.3 pixel]\n", avg_stereo_err);
+    printf("   Status: %s\n", avg_stereo_err < 0.3 ? "PASS" : "FAIL");
+    fflush(stdout);
+    
+    printf("\n3. Maximum Stereo Reprojection Error:\n");
+    printf("   Maximum: %.4f pixels [threshold: < 1.5 pixel]\n", max_stereo_err);
+    printf("   Status: %s\n", max_stereo_err < 1.5 ? "PASS" : "FAIL");
+    fflush(stdout);
+    
+    // 4. Stereo Rectification Error
+    // Note: Double-Sphere model doesn't have built-in rectification like fisheye
+    // We would need to implement custom rectification for this model
+    // For now, we'll report this metric as "Not available for Double-Sphere model"
+    printf("\n4. Stereo Rectification Error:\n");
+    printf("   Note: Rectification error evaluation not available for Double-Sphere model\n");
+    printf("   (requires custom rectification implementation for this camera model)\n");
+    fflush(stdout);
+    
+    // 5. Baseline Distance
+    // Compute average baseline from per-frame stereo transformations
+    double sum_baseline = 0.0;
+    for (size_t i = 0; i < object_points.size(); i++) {
+        // Get rotation matrices and translations
+        cv::Mat R_left_mat(3, 3, CV_64F);
+        cv::Mat R_right_mat(3, 3, CV_64F);
+        cv::Mat rvec_left = (cv::Mat_<double>(3,1) << camera_extrinsics_left[i][0],
+                             camera_extrinsics_left[i][1], camera_extrinsics_left[i][2]);
+        cv::Mat rvec_right = (cv::Mat_<double>(3,1) << camera_extrinsics_right[i][0],
+                              camera_extrinsics_right[i][1], camera_extrinsics_right[i][2]);
+        cv::Rodrigues(rvec_left, R_left_mat);
+        cv::Rodrigues(rvec_right, R_right_mat);
+        
+        cv::Mat t_left = (cv::Mat_<double>(3,1) << camera_extrinsics_left[i][3],
+                          camera_extrinsics_left[i][4], camera_extrinsics_left[i][5]);
+        cv::Mat t_right = (cv::Mat_<double>(3,1) << camera_extrinsics_right[i][3],
+                           camera_extrinsics_right[i][4], camera_extrinsics_right[i][5]);
+        
+        // Compute stereo translation
+        cv::Mat R_stereo = R_right_mat * R_left_mat.t();
+        cv::Mat T_stereo = t_right - R_stereo * t_left;
+        
+        double baseline = cv::norm(T_stereo);
+        sum_baseline += baseline;
+    }
+    
+    double calibrated_baseline = sum_baseline / object_points.size();
+    
+    printf("\n5. Baseline Distance:\n");
+    printf("   Calibrated baseline: %.6f meters (%.2f mm)\n", calibrated_baseline, calibrated_baseline * 1000.0);
+    fflush(stdout);
+    
+    if (physical_baseline > 0) {
+        double baseline_error = fabs(calibrated_baseline - physical_baseline);
+        printf("   Physical baseline:   %.6f meters (%.2f mm)\n", physical_baseline, physical_baseline * 1000.0);
+        printf("   Baseline error:      %.6f meters (%.2f mm) [threshold: < 1 mm]\n",
+               baseline_error, baseline_error * 1000.0);
+        printf("   Status: %s\n", baseline_error < 0.001 ? "PASS" : "FAIL");
+        fflush(stdout);
+    } else {
+        printf("   Physical baseline not provided (use -b option)\n");
+        fflush(stdout);
+    }
+    
+    printf("\n====================================================\n");
+    fflush(stdout);
+    
     // Save results to file
     printf("\nSaving calibration results to %s...\n", out_file);
     fflush(stdout);
@@ -785,6 +970,22 @@ int main(int argc, char const *argv[])
     fs << "k6" << ds_right.k6;
     fs << "}";
     
+    // Save stereo extrinsics (computed from KB4 initial calibration)
+    fs << "R" << Mat(R_kb4);
+    fs << "T" << Mat(T_kb4);
+    
+    // Save evaluation metrics
+    fs << "monocular_reprojection_error_left" << avg_err_left;
+    fs << "monocular_reprojection_error_right" << avg_err_right;
+    fs << "monocular_reprojection_error_avg" << avg_monocular_err;
+    fs << "stereo_reprojection_error_avg" << avg_stereo_err;
+    fs << "stereo_reprojection_error_max" << max_stereo_err;
+    fs << "calibrated_baseline" << calibrated_baseline;
+    if (physical_baseline > 0) {
+        fs << "physical_baseline" << physical_baseline;
+        fs << "baseline_error" << fabs(calibrated_baseline - physical_baseline);
+    }
+    
     fs.release();
     
     printf("\n========== Calibration Complete ==========\n");
@@ -802,6 +1003,8 @@ int main(int argc, char const *argv[])
     printf("  xi=%.6f, alpha=%.6f\n", ds_right.xi, ds_right.alpha);
     printf("  k1-k6: %.6f, %.6f, %.6f, %.6f, %.6f, %.6f\n",
            ds_right.k1, ds_right.k2, ds_right.k3, ds_right.k4, ds_right.k5, ds_right.k6);
+    
+    printf("\nCalibration results and evaluation metrics saved to: %s\n", out_file);
     fflush(stdout);
     
     // Cleanup

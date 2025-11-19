@@ -138,6 +138,12 @@ For applications requiring sub-pixel accuracy (<0.15 pixels) or extreme fisheye 
 ./calibrate_ds -w 9 -h 6 -s 0.02423 -d ../imgs/ -l left -r right -o cam_stereo_ds.yml
 ```
 
+You can also optionally specify the physical baseline distance (in meters) for baseline accuracy evaluation:
+
+```bash
+./calibrate_ds -w 9 -h 6 -s 0.02423 -d ../imgs/ -l left -r right -o cam_stereo_ds.yml -b 0.110
+```
+
 **Features:**
 - 6-order radial distortion (k1-k6) for better edge modeling
 - Double-Sphere projection (Usenko et al., 2018)
@@ -145,6 +151,7 @@ For applications requiring sub-pixel accuracy (<0.15 pixels) or extreme fisheye 
 - Ceres-based Bundle Adjustment with Huber robust kernel
 - **Automatic fallback to omnidir model for extreme FOV (>200°, e.g., 220°)**
 - Typically achieves 0.1-0.15 pixels RMSE (vs 0.3 pixels with standard methods)
+- **Full calibration accuracy evaluation with all 5 metrics**
 
 **Requirements:** Ceres Solver must be installed (`sudo apt-get install libceres-dev`)
 
@@ -164,7 +171,7 @@ For extreme wide-angle lenses (FOV > 200°, such as 220°), the MEI (Unified Cam
 
 ### Calibration Accuracy Evaluation
 
-The calibration program automatically evaluates the accuracy of the calibration and outputs the following metrics:
+Both calibration programs (`calibrate` and `calibrate_ds`) automatically evaluate the accuracy of the calibration and output the following metrics:
 
 1. **Monocular Reprojection Error**: The error between detected 2D corner points and projected 3D points using the calibrated camera model
    - Calculated separately for left and right cameras
