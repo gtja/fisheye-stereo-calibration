@@ -503,12 +503,15 @@ inline int calculateRectificationError(
     cv::Mat R_rect_left;
     double rect_strength = 1.0;  // 1.0 = full rectification, 0.0 = no rectification
     
-    if (approx_fov_deg > 180.0) {
+    if (approx_fov_deg > 170.0) {
         // Extreme wide-angle lens: use partial rectification (50%)
         rect_strength = 0.5;
-    } else if (approx_fov_deg > 150.0) {
-        // Wide-angle lens: use partial rectification (75%)
-        rect_strength = 0.75;
+    } else if (approx_fov_deg > 130.0) {
+        // Wide-angle lens: use partial rectification (70%)
+        rect_strength = 0.7;
+    } else if (approx_fov_deg > 100.0) {
+        // Moderate wide-angle lens: use partial rectification (85%)
+        rect_strength = 0.85;
     }
     
     if (rect_strength < 1.0) {
@@ -638,6 +641,7 @@ inline int calculateRectificationError(
                   << " (" << 100.0 * points_out_of_bounds / total_points << "%)" << std::endl;
         std::cerr << "   Rectified image size: " << rectified_size.width << "x" << rectified_size.height << std::endl;
         std::cerr << "   Calibrated focal lengths: left_fx=" << left_params.fx << ", right_fx=" << right_params.fx << std::endl;
+        std::cerr << "   Estimated FOV: " << approx_fov_deg << "° (rectification strength: " << rect_strength << ")" << std::endl;
         std::cerr << "   Virtual camera: fx=" << virtual_cam.fx << ", fy=" << virtual_cam.fy 
                   << ", cx=" << virtual_cam.cx << ", cy=" << virtual_cam.cy << std::endl;
         
