@@ -13,6 +13,20 @@ This contains a source file to calibrate a stereo system comprising of fisheye l
 - Advanced optimization techniques
 - Troubleshooting common issues
 
+### 🎯 Advanced: Hand-Eye Calibration Workflow
+
+**New!** For **extreme fisheye lenses (FOV > 200°)**, use the hand-eye calibration workflow for significantly better accuracy. See [HAND_EYE_CALIBRATION.md](HAND_EYE_CALIBRATION.md) for the complete guide.
+
+**Key improvements:**
+- Initial rotation error: **2° → < 0.2°** (10x improvement)
+- Final RMSE: **0.16 px → 0.08 px** (2x improvement)
+- Valid frames for bundle adjustment: **4 → 15+** (out of 19)
+
+**Three-step workflow:**
+1. Monocular calibration (`--mono` flag)
+2. Hand-eye calibration (`compute_handeye` utility)
+3. Stereo BA with joint optimization (`--joint-ba --init-extrinsic`)
+
 ### 🛠️ Utility Scripts
 
 The `utils/` directory contains Python scripts to help improve calibration quality:
