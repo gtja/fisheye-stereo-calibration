@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <cstring>
 #include <dirent.h>
 #include <algorithm>
 #include <sys/stat.h>
@@ -50,9 +51,24 @@ bool create_directory_recursive(const char* path) {
 // Helper function to ensure output directory exists for a file path
 bool ensure_output_directory(const char* filepath) {
   char tmp[256];
+  char dir_path[256];
   snprintf(tmp, sizeof(tmp), "%s", filepath);
-  char* dir = dirname(tmp);
-  return create_directory_recursive(dir);
+  
+  // Extract directory path manually to avoid dirname() issues
+  // Find the last '/' in the path
+  char* last_slash = strrchr(tmp, '/');
+  if (last_slash != NULL) {
+    // Copy the directory part (everything before the last '/')
+    size_t dir_len = last_slash - tmp;
+    if (dir_len > 0 && dir_len < sizeof(dir_path) - 1) {
+      strncpy(dir_path, tmp, dir_len);
+      dir_path[dir_len] = '\0';
+      return create_directory_recursive(dir_path);
+    }
+  }
+  
+  // If no '/' found, file is in current directory, no need to create dir
+  return true;
 }
 
 // Helper function to find all matching image files in a directory
