@@ -891,7 +891,21 @@ int main(int argc, char const *argv[])
         try {
             FileStorage fs(init_extrinsic, FileStorage::READ);
             if (!fs.isOpened()) {
-                cerr << "Error: Cannot open " << init_extrinsic << endl;
+                cerr << "\n========================================" << endl;
+                cerr << "ERROR: Cannot open initial extrinsics file" << endl;
+                cerr << "========================================" << endl;
+                cerr << "File: " << init_extrinsic << endl;
+                cerr << "\nThis file should be an INPUT file containing initial stereo extrinsics." << endl;
+                cerr << "It appears the file does not exist or cannot be read.\n" << endl;
+                cerr << "To fix this issue:" << endl;
+                cerr << "1. Create initial extrinsics using hand-eye calibration:" << endl;
+                cerr << "   ./compute_handeye -w <width> -h <height> -s <square_size> \\" << endl;
+                cerr << "                     -d <img_dir> -l left -r right -e <ext> \\" << endl;
+                cerr << "                     -L <left_ds.yml> -R <right_ds.yml> \\" << endl;
+                cerr << "                     -o <handeye.yml>" << endl;
+                cerr << "\n2. Then use the output file with --init-extrinsic flag" << endl;
+                cerr << "\nFor more details, see: HAND_EYE_CALIBRATION.md" << endl;
+                cerr << "========================================\n" << endl;
                 return 1;
             }
             

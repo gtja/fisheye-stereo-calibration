@@ -148,7 +148,20 @@ int main(int argc, char const *argv[])
     printf("Loading left camera calibration from %s...\n", left_calib_file);
     FileStorage fs_left(left_calib_file, FileStorage::READ);
     if (!fs_left.isOpened()) {
-        cerr << "Error: Cannot open " << left_calib_file << endl;
+        cerr << "\n========================================" << endl;
+        cerr << "ERROR: Cannot open left calibration file" << endl;
+        cerr << "========================================" << endl;
+        cerr << "File: " << left_calib_file << endl;
+        cerr << "\nThis file should be an INPUT file created by monocular calibration." << endl;
+        cerr << "It appears the file does not exist or cannot be read.\n" << endl;
+        cerr << "To fix this issue:" << endl;
+        cerr << "1. First run monocular calibration for the left camera:" << endl;
+        cerr << "   ./calibrate_ds -w <width> -h <height> -s <square_size> \\" << endl;
+        cerr << "                  -d <img_dir> -l left -e <ext> --mono \\" << endl;
+        cerr << "                  -o <output_dir>/left_ds.yml" << endl;
+        cerr << "\n2. Then run this hand-eye calibration tool" << endl;
+        cerr << "\nFor more details, see: HAND_EYE_CALIBRATION.md" << endl;
+        cerr << "========================================\n" << endl;
         return 1;
     }
     
@@ -185,7 +198,20 @@ int main(int argc, char const *argv[])
     printf("Loading right camera calibration from %s...\n", right_calib_file);
     FileStorage fs_right(right_calib_file, FileStorage::READ);
     if (!fs_right.isOpened()) {
-        cerr << "Error: Cannot open " << right_calib_file << endl;
+        cerr << "\n========================================" << endl;
+        cerr << "ERROR: Cannot open right calibration file" << endl;
+        cerr << "========================================" << endl;
+        cerr << "File: " << right_calib_file << endl;
+        cerr << "\nThis file should be an INPUT file created by monocular calibration." << endl;
+        cerr << "It appears the file does not exist or cannot be read.\n" << endl;
+        cerr << "To fix this issue:" << endl;
+        cerr << "1. First run monocular calibration for the right camera:" << endl;
+        cerr << "   ./calibrate_ds -w <width> -h <height> -s <square_size> \\" << endl;
+        cerr << "                  -d <img_dir> -r right -e <ext> --mono \\" << endl;
+        cerr << "                  -o <output_dir>/right_ds.yml" << endl;
+        cerr << "\n2. Then run this hand-eye calibration tool" << endl;
+        cerr << "\nFor more details, see: HAND_EYE_CALIBRATION.md" << endl;
+        cerr << "========================================\n" << endl;
         return 1;
     }
     
