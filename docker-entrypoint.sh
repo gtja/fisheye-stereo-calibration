@@ -63,6 +63,21 @@ run_hand_eye_workflow() {
         exit 1
     fi
     
+    # Verify that the output file was created and is readable
+    if [ ! -f "$left_mono" ]; then
+        echo "Error: Left camera calibration file was not created: $left_mono"
+        exit 1
+    fi
+    
+    # Ensure the file is fully written to disk (sync filesystem)
+    sync
+    
+    # Double-check file is readable
+    if [ ! -r "$left_mono" ]; then
+        echo "Error: Left camera calibration file is not readable: $left_mono"
+        exit 1
+    fi
+    
     echo ""
     echo "✓ Left camera monocular calibration completed: $left_mono"
     echo ""
@@ -87,6 +102,21 @@ run_hand_eye_workflow() {
     
     if [ $? -ne 0 ]; then
         echo "Error: Right camera monocular calibration failed"
+        exit 1
+    fi
+    
+    # Verify that the output file was created and is readable
+    if [ ! -f "$right_mono" ]; then
+        echo "Error: Right camera calibration file was not created: $right_mono"
+        exit 1
+    fi
+    
+    # Ensure the file is fully written to disk (sync filesystem)
+    sync
+    
+    # Double-check file is readable
+    if [ ! -r "$right_mono" ]; then
+        echo "Error: Right camera calibration file is not readable: $right_mono"
         exit 1
     fi
     
@@ -116,6 +146,21 @@ run_hand_eye_workflow() {
     
     if [ $? -ne 0 ]; then
         echo "Error: Hand-eye calibration failed"
+        exit 1
+    fi
+    
+    # Verify that the output file was created and is readable
+    if [ ! -f "$handeye_file" ]; then
+        echo "Error: Hand-eye calibration file was not created: $handeye_file"
+        exit 1
+    fi
+    
+    # Ensure the file is fully written to disk (sync filesystem)
+    sync
+    
+    # Double-check file is readable
+    if [ ! -r "$handeye_file" ]; then
+        echo "Error: Hand-eye calibration file is not readable: $handeye_file"
         exit 1
     fi
     

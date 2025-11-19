@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <sys/stat.h>
 #include <libgen.h>
+#include <unistd.h>
 #include "popt_pp.h"
 #include "double_sphere.h"
 
@@ -410,6 +411,9 @@ int main(int argc, char const *argv[])
     fs << "rotation_angle_rad" << angle_norm;
     fs << "baseline_meters" << norm(t_handeye);
     fs.release();
+    
+    // Ensure file is fully written to disk
+    sync();
     
     printf("Hand-eye calibration saved successfully!\n");
     printf("\nNext steps:\n");
