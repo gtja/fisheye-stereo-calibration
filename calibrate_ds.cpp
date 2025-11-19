@@ -883,24 +883,44 @@ int main(int argc, char const *argv[])
     fflush(stdout);
     
     // Define rectified image size (virtual pinhole image)
-    // Keep it at original image size to avoid enlarging errors
-    // Previous approach of enlarging the image (1.5x-2x) combined with scaled-down
-    // virtual focal length caused extreme rectification errors (600+ pixels)
-    cv::Size rectified_size = img1.size();
-    
-    // For extremely wide-angle lenses only, use modest increase
+    // For extreme wide-angle lenses, we need larger rectified images to accommodate
+    // the projection after rectification transformation
     double avg_fx = (ds_left.fx + ds_right.fx) / 2.0;
-    if (avg_fx < 250.0) {
-        // Extreme wide-angle lens detected (FOV > ~220°)
-        // Use modest 1.2x increase only for very extreme cases
-        rectified_size.width = static_cast<int>(img1.size().width * 1.2);
-        rectified_size.height = static_cast<int>(img1.size().height * 1.2);
-    }
-    // For all other cases (avg_fx >= 250), keep original size
     
-    printf("   Using rectified image size: %dx%d (original: %dx%d, avg_fx: %.1f)\n", 
+    // Estimate FOV to determine appropriate scaling
+    // For fisheye lenses, estimate based on focal length relative to image size
+    double image_diagonal = std::sqrt(img1.size().width * img1.size().width + 
+                                      img1.size().height * img1.size().height);
+    double approx_fov_deg = 2.0 * std::atan(image_diagonal / (2.0 * avg_fx)) * 180.0 / M_PI;
+    
+    // Note: The above is a pinhole approximation. For fisheye, actual FOV is typically
+    // much larger. We use focal length thresholds as a more reliable indicator:
+    // fx < 250: FOV > 220° (ultra extreme)
+    // fx < 400: FOV > 180° (extreme)
+    // fx < 500: FOV > 150° (wide-angle)
+    
+    cv::Size rectified_size = img1.size();
+    double size_scale = 1.0;
+    
+    if (avg_fx < 250.0) {
+        // Ultra extreme wide-angle (FOV > 220°)
+        // Need significantly larger rectified image
+        size_scale = 2.0;
+    } else if (avg_fx < 400.0) {
+        // Extreme wide-angle (FOV > 180°)
+        size_scale = 1.5;
+    } else if (avg_fx < 500.0) {
+        // Wide-angle (FOV > 150°)
+        size_scale = 1.3;
+    }
+    // For standard lenses (fx >= 500), keep original size
+    
+    rectified_size.width = static_cast<int>(img1.size().width * size_scale);
+    rectified_size.height = static_cast<int>(img1.size().height * size_scale);
+    
+    printf("   Using rectified image size: %dx%d (original: %dx%d, avg_fx: %.1f, scale: %.1fx)\n", 
            rectified_size.width, rectified_size.height, 
-           img1.size().width, img1.size().height, avg_fx);
+           img1.size().width, img1.size().height, avg_fx, size_scale);
     fflush(stdout);
     
     // Compute average stereo transformation (R, T) from per-frame extrinsics
