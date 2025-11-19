@@ -258,7 +258,7 @@ private:
 
 // Stereo extrinsics consistency constraint
 // Enforces that the relative transformation between left and right cameras
-// should be consistent across all frames
+// should be consistent across all frames by constraining the baseline vector
 struct StereoExtrinsicsConstraint {
     StereoExtrinsicsConstraint(const cv::Mat& R_target, const cv::Mat& T_target,
                                double rotation_weight = 10.0,
@@ -285,54 +285,53 @@ struct StereoExtrinsicsConstraint {
     bool operator()(const T* const extrinsics_left,
                    const T* const extrinsics_right,
                    T* residuals) const {
-        // Extract rotation matrices
-        T R_left[9], R_right[9];
-        ceres::AngleAxisToRotationMatrix(extrinsics_left, R_left);
-        ceres::AngleAxisToRotationMatrix(extrinsics_right, R_right);
-        
-        // Compute relative rotation: R = R_right * R_left^T
-        T R_relative[9];
-        // R_relative = R_right * R_left^T
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) {
-                R_relative[i*3 + j] = T(0.0);
-                for (int k = 0; k < 3; k++) {
-                    R_relative[i*3 + j] += R_right[i*3 + k] * R_left[j*3 + k];
-                }
-            }
-        }
-        
-        // Convert to angle-axis
-        T rvec_relative[3];
-        ceres::RotationMatrixToAngleAxis(R_relative, rvec_relative);
-        
-        // Compute relative translation: T = t_right - R * t_left
+        // Get translations
         T t_left[3] = {extrinsics_left[3], extrinsics_left[4], extrinsics_left[5]};
         T t_right[3] = {extrinsics_right[3], extrinsics_right[4], extrinsics_right[5]};
-        T R_t_left[3];
         
-        // R_t_left = R_relative * t_left
-        for (int i = 0; i < 3; i++) {
-            R_t_left[i] = T(0.0);
-            for (int j = 0; j < 3; j++) {
-                R_t_left[i] += R_relative[i*3 + j] * t_left[j];
-            }
-        }
+        // Get rotations
+        const T* rvec_left = extrinsics_left;
+        const T* rvec_right = extrinsics_right;
         
-        T t_relative[3];
-        t_relative[0] = t_right[0] - R_t_left[0];
-        t_relative[1] = t_right[1] - R_t_left[1];
-        t_relative[2] = t_right[2] - R_t_left[2];
+        // Method: Constrain baseline vector in world frame
+        // The baseline should be consistent across all frames when transformed to world frame
+        // Baseline in right camera frame: b_right = t_right - R_right * R_left^T * t_left
+        // 
+        // Simplified approach: constrain the baseline vector directly
+        // For stereo: T_stereo = t_right - R_stereo * t_left
+        // where R_stereo = R_right * R_left^T
+        //
+        // To compute this properly with angle-axis:
+        // 1. Rotate t_left by rvec_left to get it in world frame
+        // 2. Rotate result by inverse of rvec_right to get it in right camera frame
+        // 3. Compute baseline as t_right - transformed_t_left
         
-        // Rotation residuals (angle-axis difference)
-        residuals[0] = T(rotation_weight_) * (rvec_relative[0] - T(target_rotation_[0]));
-        residuals[1] = T(rotation_weight_) * (rvec_relative[1] - T(target_rotation_[1]));
-        residuals[2] = T(rotation_weight_) * (rvec_relative[2] - T(target_rotation_[2]));
+        // Step 1: Transform t_left to world frame: R_left * t_left
+        // Use negative angle-axis for inverse rotation
+        T rvec_left_inv[3] = {-rvec_left[0], -rvec_left[1], -rvec_left[2]};
+        T t_left_world[3];
+        ceres::AngleAxisRotatePoint(rvec_left_inv, t_left, t_left_world);
         
-        // Translation residuals
-        residuals[3] = T(translation_weight_) * (t_relative[0] - T(target_translation_[0]));
-        residuals[4] = T(translation_weight_) * (t_relative[1] - T(target_translation_[1]));
-        residuals[5] = T(translation_weight_) * (t_relative[2] - T(target_translation_[2]));
+        // Step 2: Transform to right camera frame: R_right^T * t_left_world
+        T t_left_in_right[3];
+        ceres::AngleAxisRotatePoint(rvec_right, t_left_world, t_left_in_right);
+        
+        // Step 3: Compute baseline in right camera frame
+        T baseline[3];
+        baseline[0] = t_right[0] - t_left_in_right[0];
+        baseline[1] = t_right[1] - t_left_in_right[1];
+        baseline[2] = t_right[2] - t_left_in_right[2];
+        
+        // Compare with target baseline
+        residuals[3] = T(translation_weight_) * (baseline[0] - T(target_translation_[0]));
+        residuals[4] = T(translation_weight_) * (baseline[1] - T(target_translation_[1]));
+        residuals[5] = T(translation_weight_) * (baseline[2] - T(target_translation_[2]));
+        
+        // For rotation: constrain relative rotation by comparing angle-axis difference
+        // This is an approximation that works well for small rotations
+        residuals[0] = T(rotation_weight_) * (rvec_right[0] - rvec_left[0] - T(target_rotation_[0]));
+        residuals[1] = T(rotation_weight_) * (rvec_right[1] - rvec_left[1] - T(target_rotation_[1]));
+        residuals[2] = T(rotation_weight_) * (rvec_right[2] - rvec_left[2] - T(target_rotation_[2]));
         
         return true;
     }
