@@ -495,31 +495,49 @@ inline int calculateRectificationError(
     }
     
     // For extreme wide-angle lenses, use partial rectification to avoid negative Z
-    // Estimate the field of view by unprojecting corner points
+    // Estimate the field of view by unprojecting edge points
     double avg_fx_check = (left_params.fx + right_params.fx) / 2.0;
     
-    // Sample corner points to estimate actual FOV
+    // Sample points at various radii from center to estimate actual FOV
+    // For extreme wide-angle lenses, we sample at multiple radii because
+    // extreme corners might be beyond the valid projection range
     double max_angle = 0.0;
-    std::vector<std::pair<double, double>> test_points = {
-        {0.0, 0.0},                                    // Top-left corner
-        {image_size.width - 1.0, 0.0},                 // Top-right corner
-        {0.0, image_size.height - 1.0},                // Bottom-left corner
-        {image_size.width - 1.0, image_size.height - 1.0}, // Bottom-right corner
-        {image_size.width / 2.0, 0.0},                 // Top center
-        {image_size.width / 2.0, image_size.height - 1.0}, // Bottom center
-        {0.0, image_size.height / 2.0},                // Left center
-        {image_size.width - 1.0, image_size.height / 2.0}  // Right center
-    };
+    int successful_unprojects = 0;
     
-    for (const auto& pt : test_points) {
-        double point2d[2] = {pt.first, pt.second};
-        double point3d[3];
-        if (unproject(left_params, point2d, point3d)) {
-            // Calculate angle from optical axis (Z-axis)
-            // point3d is already normalized to unit vector
-            double angle = std::acos(std::max(-1.0, std::min(1.0, point3d[2])));
-            if (angle > max_angle) {
-                max_angle = angle;
+    // Center point
+    double cx = image_size.width / 2.0;
+    double cy = image_size.height / 2.0;
+    
+    // Sample at 4 different radii: 50%, 70%, 85%, 95% of image diagonal
+    std::vector<double> radii_fractions = {0.50, 0.70, 0.85, 0.95};
+    double image_half_diag = 0.5 * std::sqrt(image_size.width * image_size.width + 
+                                              image_size.height * image_size.height);
+    
+    for (double frac : radii_fractions) {
+        double radius = frac * image_half_diag;
+        
+        // Sample 8 directions around the circle
+        for (int angle_idx = 0; angle_idx < 8; angle_idx++) {
+            double angle_rad = angle_idx * M_PI / 4.0;  // 0, 45, 90, 135, ...
+            double px = cx + radius * std::cos(angle_rad);
+            double py = cy + radius * std::sin(angle_rad);
+            
+            // Ensure point is within image bounds
+            if (px >= 0 && px < image_size.width && py >= 0 && py < image_size.height) {
+                double point2d[2] = {px, py};
+                double point3d[3];
+                if (unproject(left_params, point2d, point3d)) {
+                    // Calculate angle from optical axis (Z-axis)
+                    // point3d is already normalized to unit vector
+                    // Angle = acos(z_component) where z is forward direction
+                    if (point3d[2] > -0.999) {  // Ensure point is not exactly backwards
+                        double angle = std::acos(std::max(-1.0, std::min(1.0, point3d[2])));
+                        if (angle > max_angle) {
+                            max_angle = angle;
+                        }
+                        successful_unprojects++;
+                    }
+                }
             }
         }
     }
@@ -527,11 +545,29 @@ inline int calculateRectificationError(
     // Convert to full FOV (diameter, not radius)
     double approx_fov_deg = 2.0 * max_angle * 180.0 / M_PI;
     
-    // Fallback to pinhole approximation if unprojection fails
-    if (max_angle < 1e-6) {
-        double image_diagonal = std::sqrt(image_size.width * image_size.width + 
-                                          image_size.height * image_size.height);
-        approx_fov_deg = 2.0 * std::atan(image_diagonal / (2.0 * avg_fx_check)) * 180.0 / M_PI;
+    // Fallback to enhanced heuristic if unprojection fails or gives unrealistic results
+    // For fisheye lenses, there's a rough relationship: FOV ≈ k * (image_size / fx)
+    // where k depends on the lens model. For Double-Sphere, k ≈ 110-130 for extreme wide-angle
+    if (successful_unprojects < 4 || max_angle < 1e-6) {
+        // Use enhanced heuristic based on focal length ratio
+        double diag_to_fx_ratio = std::sqrt(image_size.width * image_size.width + 
+                                            image_size.height * image_size.height) / avg_fx_check;
+        
+        if (diag_to_fx_ratio > 3.5) {
+            // Extreme wide-angle: estimate FOV > 200°
+            approx_fov_deg = 220.0;  // Conservative estimate
+        } else if (diag_to_fx_ratio > 3.0) {
+            // Wide-angle: estimate FOV > 180°
+            approx_fov_deg = 190.0;
+        } else if (diag_to_fx_ratio > 2.5) {
+            // Moderate wide-angle: estimate FOV > 150°
+            approx_fov_deg = 160.0;
+        } else {
+            // Use pinhole approximation for narrower lenses
+            double image_diagonal = std::sqrt(image_size.width * image_size.width + 
+                                              image_size.height * image_size.height);
+            approx_fov_deg = 2.0 * std::atan(image_diagonal / (2.0 * avg_fx_check)) * 180.0 / M_PI;
+        }
     }
     
     cv::Mat R_rect_left;
