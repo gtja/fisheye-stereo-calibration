@@ -29,6 +29,14 @@
 
 build/
 
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
 # Output directory
 output/
 
