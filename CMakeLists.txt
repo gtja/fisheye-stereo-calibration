@@ -21,3 +21,7 @@ target_link_libraries(calibrate ${OpenCV_LIBS} "-lpopt")
 
 add_executable(calibrate_ds calibrate_ds.cpp)
 target_link_libraries(calibrate_ds ${OpenCV_LIBS} ${CERES_LIBRARIES} "-lpopt")
+
+# Test executable for rectification error calculation
+add_executable(test_rectification test_rectification.cpp)
+target_link_libraries(test_rectification ${OpenCV_LIBS} ${CERES_LIBRARIES})
