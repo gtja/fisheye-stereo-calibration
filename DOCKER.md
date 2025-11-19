@@ -126,17 +126,41 @@ docker run \
 - **3.75x more valid frames**: 15+/19 vs 4/19 frames
 - **9.4x better pre-correction**: < 5% invalid points vs 47%
 
-**Intermediate output files** (saved to output directory):
-- `left_ds.yml`: Left camera monocular calibration
-- `right_ds.yml`: Right camera monocular calibration
-- `handeye.yml`: Hand-eye calibration result
-- `cam_stereo.yml`: Final stereo calibration (your main output)
+**Intermediate output files:**
+- **In image directory** (e.g., `./imgs2/imgs_filtered/`): Filtered images after quality checks
+- **In output directory**:
+  - `left_ds.yml`: Left camera monocular calibration
+  - `right_ds.yml`: Right camera monocular calibration
+  - `handeye.yml`: Hand-eye calibration result
+  - `cam_stereo.yml`: Final stereo calibration (your main output)
 
 **When to use hand-eye workflow:**
 - Extreme fisheye lenses (FOV > 200°)
 - High-precision applications requiring < 0.1 pixel RMSE
 - When traditional stereo calibration fails or gives poor results
 - When you need reliable extrinsic initialization
+
+**Example with actual file paths:**
+```bash
+# Host machine structure:
+# ./imgs2/          <- Your original images
+# ./output/         <- Mount this for calibration results
+
+docker run \
+  -v $(pwd)/imgs2:/data/imgs \
+  -v $(pwd)/output:/data/output \
+  -e CALIBRATION_MODEL=double_sphere \
+  -e CALIBRATION_WORKFLOW=hand_eye \
+  fisheye-stereo-calibration \
+  -w 11 -h 8 -s 0.02 -d /data/imgs/ -l left -r right -e bmp -o /data/output/cam_stereo.yml
+
+# After completion, you'll find:
+# ./imgs2/imgs_filtered/  <- Filtered images (created by quality checks)
+# ./output/left_ds.yml    <- Left camera monocular calibration
+# ./output/right_ds.yml   <- Right camera monocular calibration
+# ./output/handeye.yml    <- Hand-eye calibration result
+# ./output/cam_stereo.yml <- Final stereo calibration
+```
 
 For more details, see [HAND_EYE_IMPLEMENTATION.md](HAND_EYE_IMPLEMENTATION.md).
 
