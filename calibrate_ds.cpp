@@ -65,88 +65,97 @@ vector<int> find_image_indices(const char* img_dir, const char* prefix, const ch
 void load_image_points_with_precorrection(int board_width, int board_height, float square_size,
                                          char* img_dir, char* leftimg_filename, char* rightimg_filename,
                                          char* extension, kb4::KB4Params& kb4_left, kb4::KB4Params& kb4_right) {
+    // 日志：开始加载图像点并进行SE(3)预校正
+    std::cout << "[LOG] load_image_points_with_precorrection: 开始加载图像点并进行SE(3)预校正" << std::endl;
+
     Size board_size = Size(board_width, board_height);
     Size rectified_size(960, 720);  // Large image for better corner detection
-    
+
     vector<int> left_indices = find_image_indices(img_dir, leftimg_filename, extension);
     vector<int> right_indices = find_image_indices(img_dir, rightimg_filename, extension);
-    
+
+    std::cout << "[LOG] 左相机图像数量: " << left_indices.size() << ", 右相机图像数量: " << right_indices.size() << std::endl;
+
     vector<int> common_indices;
     for (int idx : left_indices) {
         if (find(right_indices.begin(), right_indices.end(), idx) != right_indices.end()) {
             common_indices.push_back(idx);
         }
     }
-    
+
+    std::cout << "[LOG] 匹配到的图像对数量: " << common_indices.size() << std::endl;
+
     if (common_indices.empty()) {
         cerr << "Error: No matching image pairs found" << endl;
         cerr.flush();
         return;
     }
-    
+
     printf("Found %zu image pairs\n", common_indices.size());
     fflush(stdout);
-    
+
     // Create rectification maps for pre-correction
     Mat map_left_x, map_left_y, map_right_x, map_right_y;
-    
+
     for (int i : common_indices) {
         char left_img[100], right_img[100];
         sprintf(left_img, "%s/%s%d.%s", img_dir, leftimg_filename, i, extension);
         sprintf(right_img, "%s/%s%d.%s", img_dir, rightimg_filename, i, extension);
-        
+
         img1 = imread(left_img, IMREAD_COLOR);
         img2 = imread(right_img, IMREAD_COLOR);
-        
+
         if (img1.empty() || img2.empty()) {
             cerr << "Warning: Failed to load image pair " << i << endl;
             continue;
         }
-        
+
+        std::cout << "[LOG] 加载图像对: " << left_img << " 和 " << right_img << std::endl;
+
         cvtColor(img1, gray1, COLOR_BGR2GRAY);
         cvtColor(img2, gray2, COLOR_BGR2GRAY);
-        
+
         // Create rectification maps using KB4 model for pre-correction
         kb4::createRectificationMap(kb4_left, img1.size(), rectified_size, map_left_x, map_left_y);
         kb4::createRectificationMap(kb4_right, img2.size(), rectified_size, map_right_x, map_right_y);
-        
+
         // Apply rectification (warp to virtual plane)
         Mat rect_left, rect_right;
         remap(gray1, rect_left, map_left_x, map_left_y, INTER_LINEAR);
         remap(gray2, rect_right, map_right_x, map_right_y, INTER_LINEAR);
-        
+
         bool found1 = false, found2 = false;
-        
+
         // Find corners on rectified images (960×720 for better detection)
         found1 = findChessboardCorners(rect_left, board_size, corners1,
                                       CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
         found2 = findChessboardCorners(rect_right, board_size, corners2,
                                       CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
-        
+
+        std::cout << "[LOG] 图像对 " << i << " 检测到角点: left=" << found1 << ", right=" << found2 << std::endl;
+
         if (found1) {
             cornerSubPix(rect_left, corners1, Size(5, 5), Size(-1, -1),
                         TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 0.01));
-            
+
             // Back-project corners to original image coordinates
             vector<Point2f> corners1_orig;
             for (const auto& corner : corners1) {
                 // Use inverse mapping: unproject from rectified to 3D, then project to original
                 double point2d_rect[2] = {corner.x, corner.y};
-                
-                // Unproject from rectified pinhole to 3D
+
                 double fx_rect = kb4_left.fx * 0.6;
                 double fy_rect = kb4_left.fy * 0.6;
                 double cx_rect = rectified_size.width * 0.5;
                 double cy_rect = rectified_size.height * 0.5;
-                
+
                 double x_rect = (point2d_rect[0] - cx_rect) / fx_rect;
                 double y_rect = (point2d_rect[1] - cy_rect) / fy_rect;
                 double z_rect = 1.0;
-                
+
                 double norm = sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
                 double point3d[3] = {x_rect/norm, y_rect/norm, z_rect/norm};
-                
-                // Project back to original fisheye image
+
                 double point2d_orig[2];
                 if (kb4::project(kb4_left, point3d, point2d_orig)) {
                     corners1_orig.push_back(Point2f(point2d_orig[0], point2d_orig[1]));
@@ -155,29 +164,30 @@ void load_image_points_with_precorrection(int board_width, int board_height, flo
                 }
             }
             corners1 = corners1_orig;
+            std::cout << "[LOG] 左图角点反投影完成, 数量: " << corners1.size() << std::endl;
         }
-        
+
         if (found2) {
             cornerSubPix(rect_right, corners2, Size(5, 5), Size(-1, -1),
                         TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 0.01));
-            
+
             // Back-project corners to original image coordinates
             vector<Point2f> corners2_orig;
             for (const auto& corner : corners2) {
                 double point2d_rect[2] = {corner.x, corner.y};
-                
+
                 double fx_rect = kb4_right.fx * 0.6;
                 double fy_rect = kb4_right.fy * 0.6;
                 double cx_rect = rectified_size.width * 0.5;
                 double cy_rect = rectified_size.height * 0.5;
-                
+
                 double x_rect = (point2d_rect[0] - cx_rect) / fx_rect;
                 double y_rect = (point2d_rect[1] - cy_rect) / fy_rect;
                 double z_rect = 1.0;
-                
+
                 double norm = sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
                 double point3d[3] = {x_rect/norm, y_rect/norm, z_rect/norm};
-                
+
                 double point2d_orig[2];
                 if (kb4::project(kb4_right, point3d, point2d_orig)) {
                     corners2_orig.push_back(Point2f(point2d_orig[0], point2d_orig[1]));
@@ -186,23 +196,28 @@ void load_image_points_with_precorrection(int board_width, int board_height, flo
                 }
             }
             corners2 = corners2_orig;
+            std::cout << "[LOG] 右图角点反投影完成, 数量: " << corners2.size() << std::endl;
         }
-        
+
         vector<Point3d> obj;
         for (int r = 0; r < board_height; ++r) {
             for (int c = 0; c < board_width; ++c) {
                 obj.push_back(Point3d(c * square_size, r * square_size, 0.0));
             }
         }
-        
+
         if (found1 && found2) {
             cout << i << ". Found corners (with pre-correction)!" << endl;
             imagePoints1.push_back(corners1);
             imagePoints2.push_back(corners2);
             object_points.push_back(obj);
+        } else {
+            std::cout << "[LOG] 图像对 " << i << " 未能同时检测到左右角点, 跳过" << std::endl;
         }
     }
-    
+
+    std::cout << "[LOG] 完成所有图像对处理, 有效图像对数量: " << imagePoints1.size() << std::endl;
+
     for (size_t i = 0; i < imagePoints1.size(); i++) {
         vector<Point2d> v1, v2;
         for (size_t j = 0; j < imagePoints1[i].size(); j++) {
@@ -212,6 +227,10 @@ void load_image_points_with_precorrection(int board_width, int board_height, flo
         left_img_points.push_back(v1);
         right_img_points.push_back(v2);
     }
+
+    std::cout << "[LOG] 图像点转换完成, left_img_points.size(): " << left_img_points.size()
+              << ", right_img_points.size(): " << right_img_points.size()
+              << ", object_points.size(): " << object_points.size() << std::endl;
 }
 
 int main(int argc, char const *argv[])
