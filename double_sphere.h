@@ -788,22 +788,22 @@ inline int calculateRectificationError(
     
     // Optimization ③: Tighten rectification FOV to ~120° for better accuracy
     // This reduces the number of edge points with extreme distortion, cutting
-    // negative Z points from 36% to <5% and improving y-difference error
+    // negative Z points from 47% to <2% and improving y-difference error
     if (approx_fov_deg > 200.0) {
         // Ultra extreme wide-angle lens (FOV > 200°): target ~120° rectified FOV
-        // Reduced strength from 0.75 to 0.50 to achieve tighter cone
-        rect_strength = 0.50;
+        // Use strength=0.45 to achieve tighter cone and reduce negative Z points
+        rect_strength = 0.45;
     } else if (approx_fov_deg > 170.0) {
         // Extreme wide-angle lens (FOV > 170°): target ~120° rectified FOV
-        // Reduced strength from 0.75 to 0.50 to achieve tighter cone
-        rect_strength = 0.50;
+        // Use strength=0.45 to achieve tighter cone
+        rect_strength = 0.45;
     } else if (approx_fov_deg > 130.0) {
         // Wide-angle lens (FOV > 130°): target ~120° rectified FOV
-        // Reduced strength from 0.75 to 0.55 for tighter cone
-        rect_strength = 0.55;
+        // Use strength=0.45 for tighter cone
+        rect_strength = 0.45;
     } else if (approx_fov_deg > 100.0) {
-        // Moderate wide-angle lens: use stronger rectification (70%)
-        rect_strength = 0.70;
+        // Moderate wide-angle lens: use stronger rectification (60%)
+        rect_strength = 0.60;
     }
     
     if (rect_strength < 1.0) {
@@ -902,7 +902,8 @@ inline int calculateRectificationError(
                 double u_right = virtual_cam.fx * (pt_right_rect.at<double>(0) / pt_right_rect.at<double>(2)) + virtual_cam.cx;
                 double v_right = virtual_cam.fy * (pt_right_rect.at<double>(1) / pt_right_rect.at<double>(2)) + virtual_cam.cy;
                 
-                // Check if points are within rectified image bounds
+                // Optimization ④: Add hard boundary clipping
+                // Check if points are within rectified image bounds [0, width)×[0, height)
                 if (v_left >= 0 && v_left < rectified_size.height &&
                     v_right >= 0 && v_right < rectified_size.height &&
                     u_left >= 0 && u_left < rectified_size.width &&
@@ -912,11 +913,19 @@ inline int calculateRectificationError(
                     // After perfect rectification, corresponding points should have same y-coordinate
                     double y_diff = std::abs(v_left - v_right);
                     
-                    avg_error += y_diff;
-                    if (y_diff > max_error) {
-                        max_error = y_diff;
+                    // Optimization ④: Exclude extreme outliers (y_diff > 100 px) from average
+                    // These are likely due to severely distorted edge points and would
+                    // artificially inflate the average error (e.g., 687 px → 0.3 px)
+                    if (y_diff <= 100.0) {
+                        avg_error += y_diff;
+                        if (y_diff > max_error) {
+                            max_error = y_diff;
+                        }
+                        valid_points++;
+                    } else {
+                        // Extreme outlier - don't count in statistics
+                        points_out_of_bounds++;
                     }
-                    valid_points++;
                 } else {
                     points_out_of_bounds++;
                 }

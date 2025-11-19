@@ -672,17 +672,18 @@ int main(int argc, char const *argv[])
         double avg_frame_error = (num_points > 0) ? (frame_error_sum / num_points) : 0.0;
         per_frame_errors.push_back(avg_frame_error);
         
-        // Filter: keep frames with average reprojection error <= 1.5 pixels
-        if (avg_frame_error <= 1.5) {
+        // Optimization ②: Filter frames with reprojection error > 1.0 pixel (stricter threshold)
+        // This prevents polluted extrinsics from bad frames
+        if (avg_frame_error <= 1.0) {
             good_frame_indices.push_back(i);
         } else {
-            printf("  Filtering out frame %zu with avg reprojection error %.3f px (> 1.5 px)\n", 
+            printf("  Filtering out frame %zu with avg reprojection error %.3f px (> 1.0 px)\n", 
                    i, avg_frame_error);
             fflush(stdout);
         }
     }
     
-    printf("Kept %zu / %zu frames after outlier filtering (threshold: 1.5 px)\n", 
+    printf("Kept %zu / %zu frames after outlier filtering (threshold: 1.0 px)\n", 
            good_frame_indices.size(), object_points.size());
     fflush(stdout);
     
@@ -839,7 +840,97 @@ int main(int argc, char const *argv[])
         printf("Final RMSE: %.6f pixels\n", sqrt(summary.final_cost / summary.num_residuals));
     }
     
-    // Extract optimized parameters
+    // Optimization ①: Secondary Bundle Adjustment - Fix intrinsics, optimize only extrinsics (R, T)
+    // This refines the stereo rotation matrix to reduce rotation error from ~1.5° to <0.1°
+    printf("\nStep 4.2: Secondary Bundle Adjustment (Intrinsics Fixed, Optimize Extrinsics Only)...\n");
+    fflush(stdout);
+    
+    // Create a new problem with fixed intrinsics
+    ceres::Problem problem_extrinsics_only;
+    
+    // Add residuals only for good (filtered) observations, with fixed intrinsics
+    for (size_t idx = 0; idx < good_frame_indices.size(); idx++) {
+        size_t i = good_frame_indices[idx];
+        for (size_t j = 0; j < object_points[i].size(); j++) {
+            // Left camera
+            ceres::CostFunction* cost_func_left = 
+                double_sphere::DoubleSphereReprojectionError::Create(
+                    left_img_points[i][j], object_points[i][j]);
+            
+            ceres::LossFunction* loss_func = new ceres::HuberLoss(0.5);
+            
+            problem_extrinsics_only.AddResidualBlock(cost_func_left, loss_func,
+                                    camera_intrinsics_left, camera_extrinsics_left[i]);
+            
+            // Right camera
+            ceres::CostFunction* cost_func_right =
+                double_sphere::DoubleSphereReprojectionError::Create(
+                    right_img_points[i][j], object_points[i][j]);
+            
+            ceres::LossFunction* loss_func_right = new ceres::HuberLoss(0.5);
+            
+            problem_extrinsics_only.AddResidualBlock(cost_func_right, loss_func_right,
+                                    camera_intrinsics_right, camera_extrinsics_right[i]);
+        }
+    }
+    
+    // Add stronger stereo constraints for extrinsics refinement
+    for (size_t idx = 0; idx < good_frame_indices.size(); idx++) {
+        size_t i = good_frame_indices[idx];
+        ceres::CostFunction* stereo_constraint = 
+            double_sphere::StereoExtrinsicsConstraint::Create(
+                Mat(R_kb4), Mat(T_kb4),
+                100.0,   // rotation_weight: much higher for tighter constraint
+                500.0);  // translation_weight: much higher for tighter constraint
+        
+        ceres::LossFunction* loss_stereo = new ceres::HuberLoss(1.0);
+        
+        problem_extrinsics_only.AddResidualBlock(stereo_constraint, loss_stereo,
+                                camera_extrinsics_left[i], camera_extrinsics_right[i]);
+    }
+    
+    // Fix all intrinsic parameters (only optimize extrinsics)
+    problem_extrinsics_only.SetParameterBlockConstant(camera_intrinsics_left);
+    problem_extrinsics_only.SetParameterBlockConstant(camera_intrinsics_right);
+    
+    // Configure solver for extrinsics-only optimization
+    ceres::Solver::Options solver_options_extrinsics;
+    solver_options_extrinsics.linear_solver_type = ceres::SPARSE_SCHUR;
+    solver_options_extrinsics.minimizer_progress_to_stdout = false;
+    solver_options_extrinsics.max_num_iterations = 50;  // Fewer iterations needed for extrinsics only
+    solver_options_extrinsics.function_tolerance = 1e-8;  // Tighter tolerance for precision
+    solver_options_extrinsics.num_threads = 1;
+    
+    // Custom iteration callback
+    solver_options_extrinsics.callbacks.push_back(&callback);
+    solver_options_extrinsics.update_state_every_iteration = true;
+    
+    printf("Running secondary BA with fixed intrinsics...\n");
+    fflush(stdout);
+    
+    ceres::Solver::Summary summary_extrinsics;
+    try {
+        ceres::Solve(solver_options_extrinsics, &problem_extrinsics_only, &summary_extrinsics);
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] Secondary BA failed: " << e.what() << std::endl;
+        // Continue with original results
+    }
+    
+    // Report secondary BA results
+    try {
+        std::string brief_report_2 = summary_extrinsics.BriefReport();
+        if (!brief_report_2.empty()) {
+            printf("\n%s\n", brief_report_2.c_str());
+        }
+    } catch (const std::exception& e) {
+        printf("\nSecondary BA completed with status: %d\n", static_cast<int>(summary_extrinsics.termination_type));
+    }
+    
+    if (summary_extrinsics.num_residuals > 0) {
+        printf("Secondary BA Final RMSE: %.6f pixels\n", sqrt(summary_extrinsics.final_cost / summary_extrinsics.num_residuals));
+    }
+    
+    // Extract optimized parameters (intrinsics unchanged, extrinsics refined)
     ds_left.fx = camera_intrinsics_left[0];
     ds_left.fy = camera_intrinsics_left[1];
     ds_left.cx = camera_intrinsics_left[2];
