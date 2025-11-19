@@ -207,10 +207,107 @@ void load_image_points_with_precorrection(int board_width, int board_height, flo
         }
 
         if (found1 && found2) {
-            cout << i << ". Found corners (with pre-correction)!" << endl;
-            imagePoints1.push_back(corners1);
-            imagePoints2.push_back(corners2);
-            object_points.push_back(obj);
+            // Validate corners with relaxed edge tolerance (10%)
+            // Mark invalid points in red and save visualization
+            bool frame_valid = true;
+            int invalid_left = 0, invalid_right = 0;
+            int z_neg_left = 0, z_neg_right = 0;
+            
+            // 10% edge tolerance
+            double edge_tolerance = 0.10;
+            double left_min_x = img1.cols * edge_tolerance;
+            double left_max_x = img1.cols * (1.0 - edge_tolerance);
+            double left_min_y = img1.rows * edge_tolerance;
+            double left_max_y = img1.rows * (1.0 - edge_tolerance);
+            
+            double right_min_x = img2.cols * edge_tolerance;
+            double right_max_x = img2.cols * (1.0 - edge_tolerance);
+            double right_min_y = img2.rows * edge_tolerance;
+            double right_max_y = img2.rows * (1.0 - edge_tolerance);
+            
+            // Create visualization images
+            Mat vis_left = img1.clone();
+            Mat vis_right = img2.clone();
+            
+            // Check left corners
+            for (size_t j = 0; j < corners1.size(); j++) {
+                bool out_of_bounds = (corners1[j].x < left_min_x || corners1[j].x > left_max_x ||
+                                     corners1[j].y < left_min_y || corners1[j].y > left_max_y);
+                
+                // Unproject to check if Z < 0 (point behind camera)
+                double point2d[2] = {corners1[j].x, corners1[j].y};
+                double point3d[3];
+                bool z_positive = true;
+                if (kb4::unproject(kb4_left, point2d, point3d)) {
+                    if (point3d[2] < 0) {
+                        z_neg_left++;
+                        z_positive = false;
+                    }
+                }
+                
+                if (out_of_bounds || !z_positive) {
+                    invalid_left++;
+                    // Draw in red
+                    circle(vis_left, corners1[j], 8, Scalar(0, 0, 255), 2);
+                } else {
+                    // Draw in green
+                    circle(vis_left, corners1[j], 6, Scalar(0, 255, 0), 2);
+                }
+            }
+            
+            // Check right corners
+            for (size_t j = 0; j < corners2.size(); j++) {
+                bool out_of_bounds = (corners2[j].x < right_min_x || corners2[j].x > right_max_x ||
+                                     corners2[j].y < right_min_y || corners2[j].y > right_max_y);
+                
+                double point2d[2] = {corners2[j].x, corners2[j].y};
+                double point3d[3];
+                bool z_positive = true;
+                if (kb4::unproject(kb4_right, point2d, point3d)) {
+                    if (point3d[2] < 0) {
+                        z_neg_right++;
+                        z_positive = false;
+                    }
+                }
+                
+                if (out_of_bounds || !z_positive) {
+                    invalid_right++;
+                    circle(vis_right, corners2[j], 8, Scalar(0, 0, 255), 2);
+                } else {
+                    circle(vis_right, corners2[j], 6, Scalar(0, 255, 0), 2);
+                }
+            }
+            
+            // Save visualization
+            char vis_left_path[256], vis_right_path[256];
+            sprintf(vis_left_path, "%s/precorrect_vis_left%d.jpg", img_dir, i);
+            sprintf(vis_right_path, "%s/precorrect_vis_right%d.jpg", img_dir, i);
+            imwrite(vis_left_path, vis_left);
+            imwrite(vis_right_path, vis_right);
+            
+            // Relaxed acceptance criteria: allow up to 50% invalid points (10% tolerance helps)
+            double invalid_ratio_left = (double)invalid_left / corners1.size();
+            double invalid_ratio_right = (double)invalid_right / corners2.size();
+            
+            if (invalid_ratio_left > 0.5 || invalid_ratio_right > 0.5) {
+                frame_valid = false;
+                std::cout << "[LOG] 图像对 " << i << " 无效点过多: left=" << invalid_ratio_left*100 
+                         << "%, right=" << invalid_ratio_right*100 << "%" << std::endl;
+            }
+            
+            if (frame_valid) {
+                cout << i << ". Found corners (with pre-correction): "
+                     << "left_invalid=" << invalid_left << "/" << corners1.size() 
+                     << " (Z<0: " << z_neg_left << "), "
+                     << "right_invalid=" << invalid_right << "/" << corners2.size()
+                     << " (Z<0: " << z_neg_right << ")" << endl;
+                imagePoints1.push_back(corners1);
+                imagePoints2.push_back(corners2);
+                object_points.push_back(obj);
+            } else {
+                std::cout << "[LOG] 图像对 " << i << " 被过滤 (查看可视化: " 
+                         << vis_left_path << ", " << vis_right_path << ")" << std::endl;
+            }
         } else {
             std::cout << "[LOG] 图像对 " << i << " 未能同时检测到左右角点, 跳过" << std::endl;
         }
