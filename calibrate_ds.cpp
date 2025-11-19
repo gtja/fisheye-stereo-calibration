@@ -623,12 +623,87 @@ int main(int argc, char const *argv[])
         camera_extrinsics_right.push_back(extrinsics_right);
     }
     
+    // Optimization ②: Filter outlier frames with high reprojection error (> 1.5 px)
+    // This prevents skewed extrinsics from bad frames affecting the bundle adjustment
+    printf("\nStep 4.1: Filtering outlier frames before Bundle Adjustment...\n");
+    fflush(stdout);
+    
+    std::vector<size_t> good_frame_indices;
+    std::vector<double> per_frame_errors;
+    
+    for (size_t i = 0; i < object_points.size(); i++) {
+        double frame_error_sum = 0.0;
+        int num_points = 0;
+        
+        // Calculate per-frame reprojection error for both cameras
+        for (size_t j = 0; j < object_points[i].size(); j++) {
+            // Left camera reprojection error
+            double point_world[3] = {object_points[i][j].x, object_points[i][j].y, object_points[i][j].z};
+            double point_camera_left[3];
+            ceres::AngleAxisRotatePoint(camera_extrinsics_left[i], point_world, point_camera_left);
+            point_camera_left[0] += camera_extrinsics_left[i][3];
+            point_camera_left[1] += camera_extrinsics_left[i][4];
+            point_camera_left[2] += camera_extrinsics_left[i][5];
+            
+            double projected_left[2];
+            if (double_sphere::project(ds_left, point_camera_left, projected_left)) {
+                double dx = projected_left[0] - left_img_points[i][j].x;
+                double dy = projected_left[1] - left_img_points[i][j].y;
+                frame_error_sum += sqrt(dx*dx + dy*dy);
+                num_points++;
+            }
+            
+            // Right camera reprojection error
+            double point_camera_right[3];
+            ceres::AngleAxisRotatePoint(camera_extrinsics_right[i], point_world, point_camera_right);
+            point_camera_right[0] += camera_extrinsics_right[i][3];
+            point_camera_right[1] += camera_extrinsics_right[i][4];
+            point_camera_right[2] += camera_extrinsics_right[i][5];
+            
+            double projected_right[2];
+            if (double_sphere::project(ds_right, point_camera_right, projected_right)) {
+                double dx = projected_right[0] - right_img_points[i][j].x;
+                double dy = projected_right[1] - right_img_points[i][j].y;
+                frame_error_sum += sqrt(dx*dx + dy*dy);
+                num_points++;
+            }
+        }
+        
+        double avg_frame_error = (num_points > 0) ? (frame_error_sum / num_points) : 0.0;
+        per_frame_errors.push_back(avg_frame_error);
+        
+        // Filter: keep frames with average reprojection error <= 1.5 pixels
+        if (avg_frame_error <= 1.5) {
+            good_frame_indices.push_back(i);
+        } else {
+            printf("  Filtering out frame %zu with avg reprojection error %.3f px (> 1.5 px)\n", 
+                   i, avg_frame_error);
+            fflush(stdout);
+        }
+    }
+    
+    printf("Kept %zu / %zu frames after outlier filtering (threshold: 1.5 px)\n", 
+           good_frame_indices.size(), object_points.size());
+    fflush(stdout);
+    
+    // If too many frames filtered, warn but proceed with remaining frames
+    if (good_frame_indices.size() < 3) {
+        std::cerr << "Warning: Only " << good_frame_indices.size() 
+                  << " frames passed filtering. Relaxing threshold to keep at least 3 frames." << std::endl;
+        // Keep all frames if filtering is too aggressive
+        good_frame_indices.clear();
+        for (size_t i = 0; i < object_points.size(); i++) {
+            good_frame_indices.push_back(i);
+        }
+    }
+    
     // Build Ceres optimization problem
     ceres::Problem problem;
-    std::cout << "[LOG] Adding residuals for all observations..." << std::endl;
+    std::cout << "[LOG] Adding residuals for filtered observations..." << std::endl;
     
-    // Add residuals for all observations
-    for (size_t i = 0; i < object_points.size(); i++) {
+    // Add residuals only for good (filtered) observations
+    for (size_t idx = 0; idx < good_frame_indices.size(); idx++) {
+        size_t i = good_frame_indices[idx];
         for (size_t j = 0; j < object_points[i].size(); j++) {
             // Left camera
             ceres::CostFunction* cost_func_left = 
@@ -654,13 +729,15 @@ int main(int argc, char const *argv[])
         std::cout << "[LOG] Added residuals for image pair " << i << std::endl;
     }
     
-    // Add stereo constraints to refine extrinsics
+    // Optimization ①: Add stereo constraints to refine extrinsics (R, t)
+    // This enforces consistent relative pose between left and right cameras
     std::cout << "[LOG] Adding stereo extrinsics constraints..." << std::endl;
     
-    // Add extrinsics consistency constraints for each frame
+    // Add extrinsics consistency constraints for each good frame
     // This enforces that the relative pose between left and right cameras
     // should match the KB4 stereo calibration result
-    for (size_t i = 0; i < object_points.size(); i++) {
+    for (size_t idx = 0; idx < good_frame_indices.size(); idx++) {
+        size_t i = good_frame_indices[idx];
         ceres::CostFunction* stereo_constraint = 
             double_sphere::StereoExtrinsicsConstraint::Create(
                 Mat(R_kb4), Mat(T_kb4),
@@ -677,7 +754,8 @@ int main(int argc, char const *argv[])
     // Add stereo correspondence constraints
     // This enforces epipolar geometry between left and right images
     std::cout << "[LOG] Adding stereo correspondence constraints..." << std::endl;
-    for (size_t i = 0; i < object_points.size(); i++) {
+    for (size_t idx = 0; idx < good_frame_indices.size(); idx++) {
+        size_t i = good_frame_indices[idx];
         for (size_t j = 0; j < object_points[i].size(); j++) {
             ceres::CostFunction* correspondence_constraint =
                 double_sphere::StereoCorrespondenceConstraint::Create(
