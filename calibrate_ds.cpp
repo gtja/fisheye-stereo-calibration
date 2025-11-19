@@ -669,8 +669,12 @@ int main(int argc, char const *argv[])
                 fflush(stdout);
             }
         }
+        printf("[DEBUG] Exiting mono_mode block, mono_mode = %d\n", mono_mode);
+        fflush(stdout);
     } else {
         // Stereo calibration
+        printf("[DEBUG] Entering stereo calibration block\n");
+        fflush(stdout);
         printf("Attempting fisheye::stereoCalibrate with %zu image pairs...\n", obj_pts_init.size());
         fflush(stdout);
         try {
