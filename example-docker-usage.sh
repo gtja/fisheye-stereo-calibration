@@ -30,9 +30,9 @@ echo ""
 
 # Workflow Step 4
 echo "Step 4: Run calibration"
-echo "Command: docker run -v /path/to/your/imgs:/data/imgs -v \$(pwd)/output:/data/output \\"
+echo "Command: docker run -e CALIBRATION_MODEL=double_sphere -v ./imgs2:/data/imgs -v \$(pwd)/output:/data/output \\"
 echo "  fisheye-stereo-calibration \\"
-echo "  -w 9 -h 6 -s 0.02423 -n 29 -d /data/imgs/ -l left -r right -o /data/output/cam_stereo.yml"
+echo "  -w 11 -h 8 -s 0.02  -d /data/imgs/ -l left -r right -o /data/output/cam_stereo.yml"
 echo ""
 
 # Workflow Step 5
