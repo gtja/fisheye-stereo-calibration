@@ -654,6 +654,44 @@ int main(int argc, char const *argv[])
         std::cout << "[LOG] Added residuals for image pair " << i << std::endl;
     }
     
+    // Add stereo constraints to refine extrinsics
+    std::cout << "[LOG] Adding stereo extrinsics constraints..." << std::endl;
+    
+    // Add extrinsics consistency constraints for each frame
+    // This enforces that the relative pose between left and right cameras
+    // should match the KB4 stereo calibration result
+    for (size_t i = 0; i < object_points.size(); i++) {
+        ceres::CostFunction* stereo_constraint = 
+            double_sphere::StereoExtrinsicsConstraint::Create(
+                Mat(R_kb4), Mat(T_kb4),
+                20.0,   // rotation_weight: higher weight = tighter constraint
+                200.0); // translation_weight: higher weight = tighter constraint
+        
+        // Use Huber loss to handle outliers
+        ceres::LossFunction* loss_stereo = new ceres::HuberLoss(1.0);
+        
+        problem.AddResidualBlock(stereo_constraint, loss_stereo,
+                                camera_extrinsics_left[i], camera_extrinsics_right[i]);
+    }
+    
+    // Add stereo correspondence constraints
+    // This enforces epipolar geometry between left and right images
+    std::cout << "[LOG] Adding stereo correspondence constraints..." << std::endl;
+    for (size_t i = 0; i < object_points.size(); i++) {
+        for (size_t j = 0; j < object_points[i].size(); j++) {
+            ceres::CostFunction* correspondence_constraint =
+                double_sphere::StereoCorrespondenceConstraint::Create(
+                    left_img_points[i][j], right_img_points[i][j], object_points[i][j]);
+            
+            // Use Huber loss with smaller threshold for correspondence
+            ceres::LossFunction* loss_corr = new ceres::HuberLoss(0.5);
+            
+            problem.AddResidualBlock(correspondence_constraint, loss_corr,
+                                    camera_intrinsics_left, camera_intrinsics_right,
+                                    camera_extrinsics_left[i], camera_extrinsics_right[i]);
+        }
+    }
+    
     std::cout << "[LOG] Setting parameter bounds..." << std::endl;
     // Set bounds on parameters
     problem.SetParameterLowerBound(camera_intrinsics_left, 4, -1.0);  // xi >= -1

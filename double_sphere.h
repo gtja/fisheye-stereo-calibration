@@ -256,6 +256,220 @@ private:
     double world_x, world_y, world_z;
 };
 
+// Stereo extrinsics consistency constraint
+// Enforces that the relative transformation between left and right cameras
+// should be consistent across all frames
+struct StereoExtrinsicsConstraint {
+    StereoExtrinsicsConstraint(const cv::Mat& R_target, const cv::Mat& T_target,
+                               double rotation_weight = 10.0,
+                               double translation_weight = 100.0)
+        : rotation_weight_(rotation_weight),
+          translation_weight_(translation_weight) {
+        // Store target rotation as angle-axis
+        cv::Mat rvec_target;
+        cv::Rodrigues(R_target, rvec_target);
+        target_rotation_[0] = rvec_target.at<double>(0);
+        target_rotation_[1] = rvec_target.at<double>(1);
+        target_rotation_[2] = rvec_target.at<double>(2);
+        
+        // Store target translation
+        target_translation_[0] = T_target.at<double>(0);
+        target_translation_[1] = T_target.at<double>(1);
+        target_translation_[2] = T_target.at<double>(2);
+    }
+    
+    // Parameters:
+    // extrinsics_left[0-5]: rotation (angle-axis), translation for left camera
+    // extrinsics_right[0-5]: rotation (angle-axis), translation for right camera
+    template <typename T>
+    bool operator()(const T* const extrinsics_left,
+                   const T* const extrinsics_right,
+                   T* residuals) const {
+        // Extract rotation matrices
+        T R_left[9], R_right[9];
+        ceres::AngleAxisToRotationMatrix(extrinsics_left, R_left);
+        ceres::AngleAxisToRotationMatrix(extrinsics_right, R_right);
+        
+        // Compute relative rotation: R = R_right * R_left^T
+        T R_relative[9];
+        // R_relative = R_right * R_left^T
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                R_relative[i*3 + j] = T(0.0);
+                for (int k = 0; k < 3; k++) {
+                    R_relative[i*3 + j] += R_right[i*3 + k] * R_left[j*3 + k];
+                }
+            }
+        }
+        
+        // Convert to angle-axis
+        T rvec_relative[3];
+        ceres::RotationMatrixToAngleAxis(R_relative, rvec_relative);
+        
+        // Compute relative translation: T = t_right - R * t_left
+        T t_left[3] = {extrinsics_left[3], extrinsics_left[4], extrinsics_left[5]};
+        T t_right[3] = {extrinsics_right[3], extrinsics_right[4], extrinsics_right[5]};
+        T R_t_left[3];
+        
+        // R_t_left = R_relative * t_left
+        for (int i = 0; i < 3; i++) {
+            R_t_left[i] = T(0.0);
+            for (int j = 0; j < 3; j++) {
+                R_t_left[i] += R_relative[i*3 + j] * t_left[j];
+            }
+        }
+        
+        T t_relative[3];
+        t_relative[0] = t_right[0] - R_t_left[0];
+        t_relative[1] = t_right[1] - R_t_left[1];
+        t_relative[2] = t_right[2] - R_t_left[2];
+        
+        // Rotation residuals (angle-axis difference)
+        residuals[0] = T(rotation_weight_) * (rvec_relative[0] - T(target_rotation_[0]));
+        residuals[1] = T(rotation_weight_) * (rvec_relative[1] - T(target_rotation_[1]));
+        residuals[2] = T(rotation_weight_) * (rvec_relative[2] - T(target_rotation_[2]));
+        
+        // Translation residuals
+        residuals[3] = T(translation_weight_) * (t_relative[0] - T(target_translation_[0]));
+        residuals[4] = T(translation_weight_) * (t_relative[1] - T(target_translation_[1]));
+        residuals[5] = T(translation_weight_) * (t_relative[2] - T(target_translation_[2]));
+        
+        return true;
+    }
+    
+    static ceres::CostFunction* Create(const cv::Mat& R_target, const cv::Mat& T_target,
+                                      double rotation_weight = 10.0,
+                                      double translation_weight = 100.0) {
+        return new ceres::AutoDiffCostFunction<StereoExtrinsicsConstraint, 6, 6, 6>(
+            new StereoExtrinsicsConstraint(R_target, T_target, rotation_weight, translation_weight));
+    }
+    
+private:
+    double target_rotation_[3];
+    double target_translation_[3];
+    double rotation_weight_;
+    double translation_weight_;
+};
+
+// Stereo correspondence constraint (epipolar constraint)
+// Enforces that corresponding points in left and right images should project
+// from the same 3D point
+struct StereoCorrespondenceConstraint {
+    StereoCorrespondenceConstraint(const cv::Point2d& left_point,
+                                   const cv::Point2d& right_point,
+                                   const cv::Point3d& world_point)
+        : left_x_(left_point.x), left_y_(left_point.y),
+          right_x_(right_point.x), right_y_(right_point.y),
+          world_x_(world_point.x), world_y_(world_point.y), world_z_(world_point.z) {}
+    
+    // Parameters:
+    // intrinsics_left[0-11]: fx, fy, cx, cy, xi, alpha, k1-k6
+    // intrinsics_right[0-11]: fx, fy, cx, cy, xi, alpha, k1-k6
+    // extrinsics_left[0-5]: rotation (angle-axis), translation
+    // extrinsics_right[0-5]: rotation (angle-axis), translation
+    template <typename T>
+    bool operator()(const T* const intrinsics_left,
+                   const T* const intrinsics_right,
+                   const T* const extrinsics_left,
+                   const T* const extrinsics_right,
+                   T* residuals) const {
+        // Transform world point to left camera
+        T point_world[3] = {T(world_x_), T(world_y_), T(world_z_)};
+        T point_left[3];
+        ceres::AngleAxisRotatePoint(extrinsics_left, point_world, point_left);
+        point_left[0] += extrinsics_left[3];
+        point_left[1] += extrinsics_left[4];
+        point_left[2] += extrinsics_left[5];
+        
+        // Transform world point to right camera
+        T point_right[3];
+        ceres::AngleAxisRotatePoint(extrinsics_right, point_world, point_right);
+        point_right[0] += extrinsics_right[3];
+        point_right[1] += extrinsics_right[4];
+        point_right[2] += extrinsics_right[5];
+        
+        // Project to left image
+        T fx_left = intrinsics_left[0];
+        T fy_left = intrinsics_left[1];
+        T cx_left = intrinsics_left[2];
+        T cy_left = intrinsics_left[3];
+        T xi_left = intrinsics_left[4];
+        T alpha_left = intrinsics_left[5];
+        T k1_left = intrinsics_left[6];
+        T k2_left = intrinsics_left[7];
+        T k3_left = intrinsics_left[8];
+        T k4_left = intrinsics_left[9];
+        T k5_left = intrinsics_left[10];
+        T k6_left = intrinsics_left[11];
+        
+        // Double-Sphere projection for left
+        T d1_left = ceres::sqrt(point_left[0]*point_left[0] + point_left[1]*point_left[1] + point_left[2]*point_left[2]);
+        T d2_left = ceres::sqrt(point_left[0]*point_left[0] + point_left[1]*point_left[1] + 
+                               (xi_left*d1_left + point_left[2])*(xi_left*d1_left + point_left[2]));
+        T denom_left = alpha_left*d2_left + (T(1.0) - alpha_left)*(xi_left*d1_left + point_left[2]);
+        
+        T mx_left = point_left[0] / denom_left;
+        T my_left = point_left[1] / denom_left;
+        T r2_left = mx_left*mx_left + my_left*my_left;
+        T r4_left = r2_left*r2_left;
+        T r6_left = r4_left*r2_left;
+        T radial_left = T(1.0) + k1_left*r2_left + k2_left*r4_left + k3_left*r6_left + 
+                        k4_left*r2_left*r4_left + k5_left*r4_left*r4_left + k6_left*r2_left*r6_left;
+        T predicted_left_x = fx_left * mx_left * radial_left + cx_left;
+        T predicted_left_y = fy_left * my_left * radial_left + cy_left;
+        
+        // Project to right image
+        T fx_right = intrinsics_right[0];
+        T fy_right = intrinsics_right[1];
+        T cx_right = intrinsics_right[2];
+        T cy_right = intrinsics_right[3];
+        T xi_right = intrinsics_right[4];
+        T alpha_right = intrinsics_right[5];
+        T k1_right = intrinsics_right[6];
+        T k2_right = intrinsics_right[7];
+        T k3_right = intrinsics_right[8];
+        T k4_right = intrinsics_right[9];
+        T k5_right = intrinsics_right[10];
+        T k6_right = intrinsics_right[11];
+        
+        // Double-Sphere projection for right
+        T d1_right = ceres::sqrt(point_right[0]*point_right[0] + point_right[1]*point_right[1] + point_right[2]*point_right[2]);
+        T d2_right = ceres::sqrt(point_right[0]*point_right[0] + point_right[1]*point_right[1] + 
+                                (xi_right*d1_right + point_right[2])*(xi_right*d1_right + point_right[2]));
+        T denom_right = alpha_right*d2_right + (T(1.0) - alpha_right)*(xi_right*d1_right + point_right[2]);
+        
+        T mx_right = point_right[0] / denom_right;
+        T my_right = point_right[1] / denom_right;
+        T r2_right = mx_right*mx_right + my_right*my_right;
+        T r4_right = r2_right*r2_right;
+        T r6_right = r4_right*r2_right;
+        T radial_right = T(1.0) + k1_right*r2_right + k2_right*r4_right + k3_right*r6_right + 
+                         k4_right*r2_right*r4_right + k5_right*r4_right*r4_right + k6_right*r2_right*r6_right;
+        T predicted_right_x = fx_right * mx_right * radial_right + cx_right;
+        T predicted_right_y = fy_right * my_right * radial_right + cy_right;
+        
+        // Compute residuals (should match observed points)
+        residuals[0] = predicted_left_x - T(left_x_);
+        residuals[1] = predicted_left_y - T(left_y_);
+        residuals[2] = predicted_right_x - T(right_x_);
+        residuals[3] = predicted_right_y - T(right_y_);
+        
+        return true;
+    }
+    
+    static ceres::CostFunction* Create(const cv::Point2d& left_point,
+                                      const cv::Point2d& right_point,
+                                      const cv::Point3d& world_point) {
+        return new ceres::AutoDiffCostFunction<StereoCorrespondenceConstraint, 4, 12, 12, 6, 6>(
+            new StereoCorrespondenceConstraint(left_point, right_point, world_point));
+    }
+    
+private:
+    double left_x_, left_y_;
+    double right_x_, right_y_;
+    double world_x_, world_y_, world_z_;
+};
+
 // Virtual pinhole camera parameters for rectification
 struct VirtualPinholeParams {
     double fx, fy;  // Virtual focal length
@@ -573,20 +787,24 @@ inline int calculateRectificationError(
     cv::Mat R_rect_left;
     double rect_strength = 1.0;  // 1.0 = full rectification, 0.0 = no rectification
     
+    // After stereo extrinsics refinement with bundle adjustment constraints,
+    // we can use tighter rectification (higher strength) which results in
+    // target ~150° FOV instead of 180°, reducing rectification errors
     if (approx_fov_deg > 200.0) {
         // Ultra extreme wide-angle lens (FOV > 200°): target ~150° rectified FOV
-        // Moderate rectification strength to balance coverage and accuracy
-        rect_strength = 0.60;
+        // Increased rectification strength from 0.60 to 0.75 after extrinsics refinement
+        rect_strength = 0.75;
     } else if (approx_fov_deg > 170.0) {
         // Extreme wide-angle lens (FOV > 170°): target ~150° rectified FOV
-        // Optimized for better valid point ratio
-        rect_strength = 0.60;
+        // Increased rectification strength from 0.60 to 0.75 after extrinsics refinement
+        rect_strength = 0.75;
     } else if (approx_fov_deg > 130.0) {
-        // Wide-angle lens (FOV > 130°): target ~120° rectified FOV
-        rect_strength = 0.60;
+        // Wide-angle lens (FOV > 130°): target ~130° rectified FOV
+        // Increased rectification strength from 0.60 to 0.75
+        rect_strength = 0.75;
     } else if (approx_fov_deg > 100.0) {
-        // Moderate wide-angle lens: use partial rectification (70%)
-        rect_strength = 0.7;
+        // Moderate wide-angle lens: use stronger rectification (80%)
+        rect_strength = 0.8;
     }
     
     if (rect_strength < 1.0) {
