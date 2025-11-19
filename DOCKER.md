@@ -342,8 +342,8 @@ The calibration will generate a YAML file with the following calibration paramet
 - `-s, --square_size NUM`: Checkerboard square size in meters
 - `-n, --num_imgs NUM`: Number of image pairs to process
 - `-d, --img_dir STR`: Directory containing the images (must end with /)
-- `-l, --leftimg_filename STR`: Prefix for left camera images
-- `-r, --rightimg_filename STR`: Prefix for right camera images
+- `-l, --left STR`: Prefix for left camera images
+- `-r, --right STR`: Prefix for right camera images
 - `-e, --extension STR`: Image file extension (default: jpg). Supports jpg, bmp, png, and other OpenCV-compatible formats
 - `-o, --out_file STR`: Output calibration file path (YAML format)
 - `-b, --physical_baseline NUM`: Physical baseline distance in meters (optional, for accuracy evaluation)
