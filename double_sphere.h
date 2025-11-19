@@ -574,14 +574,17 @@ inline int calculateRectificationError(
     double rect_strength = 1.0;  // 1.0 = full rectification, 0.0 = no rectification
     
     if (approx_fov_deg > 200.0) {
-        // Ultra extreme wide-angle lens (FOV > 200°): use very gentle rectification (25%)
-        rect_strength = 0.25;
+        // Ultra extreme wide-angle lens (FOV > 200°): use stronger rectification (80%)
+        // Increased from 0.25 to 0.80 to expand visible cone from 130° to ~180°
+        rect_strength = 0.80;
     } else if (approx_fov_deg > 170.0) {
-        // Extreme wide-angle lens (FOV > 170°): use partial rectification (30%)
-        rect_strength = 0.30;
+        // Extreme wide-angle lens (FOV > 170°): use strong rectification (75%)
+        // Increased from 0.30 to 0.75 to better handle wide FOV
+        rect_strength = 0.75;
     } else if (approx_fov_deg > 130.0) {
-        // Wide-angle lens (FOV > 130°): use partial rectification (40%)
-        rect_strength = 0.40;
+        // Wide-angle lens (FOV > 130°): use moderate rectification (60%)
+        // Increased from 0.40 to 0.60 for better coverage
+        rect_strength = 0.60;
     } else if (approx_fov_deg > 100.0) {
         // Moderate wide-angle lens: use partial rectification (70%)
         rect_strength = 0.7;
@@ -607,25 +610,28 @@ inline int calculateRectificationError(
     
     // For wide-angle lenses, adjust virtual focal length based on FOV
     // The virtual focal length determines the FOV of the rectified image
-    // For extreme wide-angle, we need to increase it to avoid mapping peripheral
-    // regions that would be behind the virtual camera
+    // For extreme wide-angle, we need to DECREASE it to expand the visible cone
+    // and allow more corner points to project into the rectified image
     double focal_scale = 1.0;
     if (approx_fov_deg > 200.0) {
-        // Ultra extreme wide-angle (FOV > 200°): significantly increase focal length
-        // to crop to the central 100-120° FOV that can be safely rectified
-        focal_scale = 1.8;
+        // Ultra extreme wide-angle (FOV > 200°): significantly decrease focal length
+        // Target: fx=300-350 px to expand rectified FOV to ~180° for 1600x1200 image
+        // Changed from 1.8 to 0.65-0.75 to allow edge points to be visible
+        focal_scale = 0.70;
     } else if (approx_fov_deg > 170.0) {
-        // Extreme wide-angle (FOV > 170°): increase focal length to crop to ~120-140° FOV
-        focal_scale = 1.5;
+        // Extreme wide-angle (FOV > 170°): decrease focal length for wider rectified FOV
+        // Changed from 1.5 to 0.80 to expand visible cone
+        focal_scale = 0.80;
     } else if (approx_fov_deg > 130.0) {
-        // Wide-angle (FOV > 130°): modest increase to crop to ~100-120° FOV
-        focal_scale = 1.2;
+        // Wide-angle (FOV > 130°): slight decrease for better coverage
+        // Changed from 1.2 to 0.90
+        focal_scale = 0.90;
     } else if (approx_fov_deg > 100.0) {
         // Moderate wide-angle: keep similar to original
         focal_scale = 1.0;
     } else {
-        // Standard lens: can use slightly reduced focal length
-        focal_scale = 0.9;
+        // Standard lens: can use slightly increased focal length
+        focal_scale = 1.1;
     }
     
     VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height, 
