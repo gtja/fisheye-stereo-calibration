@@ -209,16 +209,18 @@ if [ $# -gt 0 ]; then
     
     # Check if quality checks should be run
     if [ "$RUN_QUALITY_CHECKS" = "true" ]; then
-        # Parse arguments to extract necessary parameters for quality checks
+        # Parse arguments to extract necessary parameters for quality checks and workflow
         args=("$@")
         for i in "${!args[@]}"; do
             case "${args[$i]}" in
                 -w) BOARD_WIDTH="${args[$((i+1))]}" ;;
                 -h) BOARD_HEIGHT="${args[$((i+1))]}" ;;
+                -s) SQUARE_SIZE="${args[$((i+1))]}" ;;
                 -d) IMG_DIR="${args[$((i+1))]}" ;;
                 -l) LEFT_PREFIX="${args[$((i+1))]}" ;;
                 -r) RIGHT_PREFIX="${args[$((i+1))]}" ;;
                 -e) IMAGE_EXTENSION="${args[$((i+1))]}" ;;
+                -o) OUTPUT_FILE="${args[$((i+1))]}" ;;
             esac
         done
         
@@ -260,23 +262,54 @@ if [ $# -gt 0 ]; then
             done
         fi
         
-        echo ""
-        echo "╔════════════════════════════════════════════════════════════════════════════╗"
-        if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
-            echo "║         RUNNING DOUBLE-SPHERE STEREO CALIBRATION                            ║"
+        # Check if hand-eye workflow is requested
+        if [ "$CALIBRATION_WORKFLOW" = "hand_eye" ]; then
+            run_hand_eye_workflow
         else
-            echo "║         RUNNING STEREO CALIBRATION                                         ║"
-        fi
-        echo "╚════════════════════════════════════════════════════════════════════════════╝"
-        echo ""
-        if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
-            echo "Command: ./calibrate_ds ${args[@]}"
-            exec ./calibrate_ds "${args[@]}"
-        else
-            exec ./calibrate "${args[@]}"
+            echo ""
+            echo "╔════════════════════════════════════════════════════════════════════════════╗"
+            if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+                echo "║         RUNNING DOUBLE-SPHERE STEREO CALIBRATION                            ║"
+            else
+                echo "║         RUNNING STEREO CALIBRATION                                         ║"
+            fi
+            echo "╚════════════════════════════════════════════════════════════════════════════╝"
+            echo ""
+            if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+                echo "Command: ./calibrate_ds ${args[@]}"
+                exec ./calibrate_ds "${args[@]}"
+            else
+                exec ./calibrate "${args[@]}"
+            fi
         fi
     else
-        exec ./calibrate "$@"
+        # Quality checks are disabled, but still need to check for hand-eye workflow
+        # Parse arguments to extract necessary parameters for workflow
+        args=("$@")
+        for i in "${!args[@]}"; do
+            case "${args[$i]}" in
+                -w) BOARD_WIDTH="${args[$((i+1))]}" ;;
+                -h) BOARD_HEIGHT="${args[$((i+1))]}" ;;
+                -s) SQUARE_SIZE="${args[$((i+1))]}" ;;
+                -d) IMG_DIR="${args[$((i+1))]}" ;;
+                -l) LEFT_PREFIX="${args[$((i+1))]}" ;;
+                -r) RIGHT_PREFIX="${args[$((i+1))]}" ;;
+                -e) IMAGE_EXTENSION="${args[$((i+1))]}" ;;
+                -o) OUTPUT_FILE="${args[$((i+1))]}" ;;
+            esac
+        done
+        
+        # Check if hand-eye workflow is requested
+        if [ "$CALIBRATION_WORKFLOW" = "hand_eye" ]; then
+            run_hand_eye_workflow
+        else
+            # Traditional workflow with custom arguments
+            if [ "$CALIBRATION_MODEL" = "double_sphere" ]; then
+                exec ./calibrate_ds "$@"
+            else
+                exec ./calibrate "$@"
+            fi
+        fi
     fi
 else
     # Use environment variables
