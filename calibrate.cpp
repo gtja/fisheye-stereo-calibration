@@ -401,6 +401,11 @@ int main(int argc, char const *argv[])
     
     // Reopen file storage to append rectification results
     cv::FileStorage fs1(out_file, cv::FileStorage::APPEND);
+    if (!fs1.isOpened()) {
+        cerr << "Error: Cannot open output file for appending: " << out_file << endl;
+        return 1;
+    }
+    
     fs1 << "R1" << R1;
     fs1 << "R2" << R2;
     fs1 << "P1" << P1;
@@ -414,6 +419,11 @@ int main(int argc, char const *argv[])
     
     // Reopen file storage to append rectification results
     cv::FileStorage fs1(out_file, cv::FileStorage::APPEND);
+    if (!fs1.isOpened()) {
+        cerr << "Error: Cannot open output file for appending: " << out_file << endl;
+        return 1;
+    }
+    
     fs1 << "R1" << R1;
     fs1 << "R2" << R2;
     fs1 << "P1" << P1;
@@ -665,6 +675,11 @@ int main(int argc, char const *argv[])
   
   // Write evaluation metrics to output file
   cv::FileStorage fs_eval(out_file, cv::FileStorage::APPEND);
+  if (!fs_eval.isOpened()) {
+      cerr << "Error: Cannot open output file for appending: " << out_file << endl;
+      return 1;
+  }
+  
   fs_eval << "monocular_reprojection_error_left" << avg_err_left;
   fs_eval << "monocular_reprojection_error_right" << avg_err_right;
   fs_eval << "monocular_reprojection_error_avg" << avg_monocular_err;
