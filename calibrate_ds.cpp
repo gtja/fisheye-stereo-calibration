@@ -855,6 +855,10 @@ int main(int argc, char const *argv[])
         ds_params.k5 = 0.0;
         ds_params.k6 = 0.0;
         
+        printf("[DEBUG] DS params initialized: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n", 
+               ds_params.fx, ds_params.fy, ds_params.cx, ds_params.cy);
+        fflush(stdout);
+        
         printf("[DEBUG] Ensuring output directory exists for: %s\n", output_file);
         fflush(stdout);
         
