@@ -717,6 +717,64 @@ int main(int argc, char const *argv[])
         return 0;
     }
     
+    // Load initial extrinsics if provided (hand-eye calibrated)
+    if (init_extrinsic != NULL) {
+        printf("\nLoading initial extrinsics from %s...\n", init_extrinsic);
+        fflush(stdout);
+        
+        try {
+            FileStorage fs(init_extrinsic, FileStorage::READ);
+            if (!fs.isOpened()) {
+                cerr << "Error: Cannot open " << init_extrinsic << endl;
+                return 1;
+            }
+            
+            // Read rotation matrix
+            Mat R_handeye;
+            fs["R"] >> R_handeye;
+            if (R_handeye.empty() || R_handeye.rows != 3 || R_handeye.cols != 3) {
+                cerr << "Error: Invalid rotation matrix in " << init_extrinsic << endl;
+                return 1;
+            }
+            
+            // Read translation vector
+            Mat T_handeye;
+            fs["T"] >> T_handeye;
+            if (T_handeye.empty() || (T_handeye.rows != 3 || T_handeye.cols != 1) && 
+                (T_handeye.rows != 1 || T_handeye.cols != 3)) {
+                cerr << "Error: Invalid translation vector in " << init_extrinsic << endl;
+                return 1;
+            }
+            
+            fs.release();
+            
+            // Convert to the expected format
+            R_kb4 = Matx33d((double*)R_handeye.data);
+            if (T_handeye.rows == 1) {
+                T_kb4 = Vec3d(T_handeye.at<double>(0), T_handeye.at<double>(1), T_handeye.at<double>(2));
+            } else {
+                T_kb4 = Vec3d(T_handeye.at<double>(0), T_handeye.at<double>(1), T_handeye.at<double>(2));
+            }
+            
+            printf("Loaded hand-eye calibrated extrinsics:\n");
+            printf("  R = [%.6f, %.6f, %.6f;\n", R_kb4(0,0), R_kb4(0,1), R_kb4(0,2));
+            printf("       %.6f, %.6f, %.6f;\n", R_kb4(1,0), R_kb4(1,1), R_kb4(1,2));
+            printf("       %.6f, %.6f, %.6f]\n", R_kb4(2,0), R_kb4(2,1), R_kb4(2,2));
+            printf("  T = [%.6f, %.6f, %.6f]\n", T_kb4[0], T_kb4[1], T_kb4[2]);
+            
+            // Compute rotation angle for validation
+            Mat rvec_handeye;
+            Rodrigues(Mat(R_kb4), rvec_handeye);
+            double angle_norm = cv::norm(rvec_handeye);
+            printf("  Rotation angle: %.4f degrees\n", angle_norm * 180.0 / CV_PI);
+            fflush(stdout);
+            
+        } catch (const cv::Exception& e) {
+            cerr << "Error loading extrinsics: " << e.what() << endl;
+            return 1;
+        }
+    }
+    
     // Step 2: Load image points with SE(3) pre-correction
     printf("\nStep 2: Corner detection with SE(3) pre-correction...\n");
     fflush(stdout);
@@ -998,16 +1056,30 @@ int main(int argc, char const *argv[])
     }
     
     std::cout << "[LOG] Setting parameter bounds..." << std::endl;
-    // Set bounds on parameters
-    problem.SetParameterLowerBound(camera_intrinsics_left, 4, -1.0);  // xi >= -1
-    problem.SetParameterUpperBound(camera_intrinsics_left, 4, 1.0);   // xi <= 1
-    problem.SetParameterLowerBound(camera_intrinsics_left, 5, 0.0);   // alpha >= 0
-    problem.SetParameterUpperBound(camera_intrinsics_left, 5, 1.0);   // alpha <= 1
     
-    problem.SetParameterLowerBound(camera_intrinsics_right, 4, -1.0);
-    problem.SetParameterUpperBound(camera_intrinsics_right, 4, 1.0);
-    problem.SetParameterLowerBound(camera_intrinsics_right, 5, 0.0);
-    problem.SetParameterUpperBound(camera_intrinsics_right, 5, 1.0);
+    if (joint_ba) {
+        // Joint BA: Optimize both intrinsics and extrinsics
+        printf("Joint BA mode: Optimizing intrinsics (xi, alpha) + extrinsics\n");
+        fflush(stdout);
+        
+        // Set bounds on DS-specific parameters (xi, alpha)
+        problem.SetParameterLowerBound(camera_intrinsics_left, 4, -1.0);  // xi >= -1
+        problem.SetParameterUpperBound(camera_intrinsics_left, 4, 1.0);   // xi <= 1
+        problem.SetParameterLowerBound(camera_intrinsics_left, 5, 0.0);   // alpha >= 0
+        problem.SetParameterUpperBound(camera_intrinsics_left, 5, 1.0);   // alpha <= 1
+        
+        problem.SetParameterLowerBound(camera_intrinsics_right, 4, -1.0);
+        problem.SetParameterUpperBound(camera_intrinsics_right, 4, 1.0);
+        problem.SetParameterLowerBound(camera_intrinsics_right, 5, 0.0);
+        problem.SetParameterUpperBound(camera_intrinsics_right, 5, 1.0);
+    } else {
+        // Standard BA: Lock intrinsics, optimize only extrinsics
+        printf("Standard BA mode: Intrinsics locked, optimizing only extrinsics\n");
+        fflush(stdout);
+        
+        problem.SetParameterBlockConstant(camera_intrinsics_left);
+        problem.SetParameterBlockConstant(camera_intrinsics_right);
+    }
     
     std::cout << "[LOG] Configuring Ceres solver..." << std::endl;
     // Configure solver
