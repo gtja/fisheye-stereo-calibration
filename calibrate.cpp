@@ -322,6 +322,12 @@ int main(int argc, char const *argv[])
     xi2 = xi2_mat.at<double>(0);
     
     cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
+    if (!fs1.isOpened()) {
+        cerr << "Error: Cannot open output file for writing: " << out_file << endl;
+        cerr << "Please check that the output directory exists and you have write permissions." << endl;
+        return 1;
+    }
+    
     fs1 << "model_type" << "omnidir";
     fs1 << "K1" << K1_mat;
     fs1 << "K2" << K2_mat;
@@ -356,6 +362,12 @@ int main(int argc, char const *argv[])
         cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 1e-5));
 
     cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
+    if (!fs1.isOpened()) {
+        cerr << "Error: Cannot open output file for writing: " << out_file << endl;
+        cerr << "Please check that the output directory exists and you have write permissions." << endl;
+        return 1;
+    }
+    
     fs1 << "model_type" << "fisheye";
     fs1 << "K1" << Mat(K1);
     fs1 << "K2" << Mat(K2);
@@ -389,6 +401,11 @@ int main(int argc, char const *argv[])
     
     // Reopen file storage to append rectification results
     cv::FileStorage fs1(out_file, cv::FileStorage::APPEND);
+    if (!fs1.isOpened()) {
+        cerr << "Error: Cannot open output file for appending: " << out_file << endl;
+        return 1;
+    }
+    
     fs1 << "R1" << R1;
     fs1 << "R2" << R2;
     fs1 << "P1" << P1;
@@ -402,6 +419,11 @@ int main(int argc, char const *argv[])
     
     // Reopen file storage to append rectification results
     cv::FileStorage fs1(out_file, cv::FileStorage::APPEND);
+    if (!fs1.isOpened()) {
+        cerr << "Error: Cannot open output file for appending: " << out_file << endl;
+        return 1;
+    }
+    
     fs1 << "R1" << R1;
     fs1 << "R2" << R2;
     fs1 << "P1" << P1;
@@ -653,6 +675,11 @@ int main(int argc, char const *argv[])
   
   // Write evaluation metrics to output file
   cv::FileStorage fs_eval(out_file, cv::FileStorage::APPEND);
+  if (!fs_eval.isOpened()) {
+      cerr << "Error: Cannot open output file for appending: " << out_file << endl;
+      return 1;
+  }
+  
   fs_eval << "monocular_reprojection_error_left" << avg_err_left;
   fs_eval << "monocular_reprojection_error_right" << avg_err_right;
   fs_eval << "monocular_reprojection_error_avg" << avg_monocular_err;
