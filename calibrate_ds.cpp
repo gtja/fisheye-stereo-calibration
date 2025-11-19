@@ -243,6 +243,9 @@ int main(int argc, char const *argv[])
     char* out_file;
     char* extension = (char*)"jpg";
     double physical_baseline = -1.0;
+    int mono_mode = 0;              // --mono flag for monocular calibration
+    int joint_ba = 0;               // --joint-ba flag for joint intrinsic+extrinsic optimization
+    char* init_extrinsic = NULL;    // --init-extrinsic for loading hand-eye calibrated extrinsics
 
     printf("[LOG] Initializing popt options...\n");
     fflush(stdout);
@@ -256,6 +259,9 @@ int main(int argc, char const *argv[])
         { "out_file",'o',POPT_ARG_STRING,&out_file,0,"Output calibration filename (YML)","STR" },
         { "extension",'e',POPT_ARG_STRING,&extension,0,"Image file extension (default: jpg)","STR" },
         { "baseline",'b',POPT_ARG_DOUBLE,&physical_baseline,0,"Physical baseline distance in meters (for accuracy evaluation)","NUM" },
+        { "mono",0,POPT_ARG_NONE,&mono_mode,0,"Monocular calibration mode (calibrate single camera)","" },
+        { "joint-ba",0,POPT_ARG_NONE,&joint_ba,0,"Joint bundle adjustment (optimize intrinsics + extrinsics)","" },
+        { "init-extrinsic",0,POPT_ARG_STRING,&init_extrinsic,0,"Load initial extrinsics from YAML file (hand-eye calibrated)","STR" },
         POPT_AUTOHELP
         { NULL, 0, 0, NULL, 0, NULL, NULL }
     };
@@ -269,26 +275,65 @@ int main(int argc, char const *argv[])
     while((c = popt.getNextOpt()) >= 0) {}
     
     printf("========== Double-Sphere Camera Calibration ==========\n");
-    printf("Using DS model + 6-order radial distortion + Ceres BA\n\n");
+    printf("Using DS model + 6-order radial distortion + Ceres BA\n");
+    if (mono_mode) {
+        printf("Mode: Monocular calibration\n");
+    } else {
+        printf("Mode: Stereo calibration\n");
+    }
+    if (joint_ba) {
+        printf("Bundle Adjustment: Joint intrinsics + extrinsics optimization\n");
+    } else {
+        printf("Bundle Adjustment: Extrinsics only (intrinsics fixed)\n");
+    }
+    printf("\n");
     fflush(stdout);
+    
+    // Check if we're in mono mode
+    bool is_left_only = (leftimg_filename != NULL && rightimg_filename == NULL);
+    bool is_right_only = (leftimg_filename == NULL && rightimg_filename != NULL);
+    bool is_stereo = (leftimg_filename != NULL && rightimg_filename != NULL);
+    
+    if (mono_mode && !is_left_only && !is_right_only) {
+        cerr << "Error: In mono mode, specify either --left or --right, not both" << endl;
+        return 1;
+    }
+    
+    if (!mono_mode && !is_stereo) {
+        cerr << "Error: In stereo mode, both --left and --right must be specified" << endl;
+        return 1;
+    }
     
     // Step 1: Initial KB4 coarse calibration using OpenCV fisheye
     printf("Step 1: KB4 Coarse Calibration (initial guess)...\n");
     fflush(stdout);
     
     // Load images for initial calibration
-    vector<int> left_indices = find_image_indices(img_dir, leftimg_filename, extension);
-    vector<int> right_indices = find_image_indices(img_dir, rightimg_filename, extension);
+    vector<int> left_indices, right_indices, common_indices;
     
-    vector<int> common_indices;
-    for (int idx : left_indices) {
-        if (find(right_indices.begin(), right_indices.end(), idx) != right_indices.end()) {
-            common_indices.push_back(idx);
+    if (mono_mode) {
+        // Monocular mode: load only the specified camera images
+        if (is_left_only) {
+            left_indices = find_image_indices(img_dir, leftimg_filename, extension);
+            common_indices = left_indices;
+        } else {
+            right_indices = find_image_indices(img_dir, rightimg_filename, extension);
+            common_indices = right_indices;
+        }
+    } else {
+        // Stereo mode: load both cameras and find common indices
+        left_indices = find_image_indices(img_dir, leftimg_filename, extension);
+        right_indices = find_image_indices(img_dir, rightimg_filename, extension);
+        
+        for (int idx : left_indices) {
+            if (find(right_indices.begin(), right_indices.end(), idx) != right_indices.end()) {
+                common_indices.push_back(idx);
+            }
         }
     }
     
     if (common_indices.empty()) {
-        cerr << "Error: No matching image pairs found" << endl;
+        cerr << "Error: No matching image" << (mono_mode ? "s" : " pairs") << " found" << endl;
         cerr.flush();
         return 1;
     }
@@ -301,32 +346,46 @@ int main(int argc, char const *argv[])
     
     for (int i : common_indices) {
         char left_img[100], right_img[100];
-        sprintf(left_img, "%s/%s%d.%s", img_dir, leftimg_filename, i, extension);
-        sprintf(right_img, "%s/%s%d.%s", img_dir, rightimg_filename, i, extension);
+        bool load_left = is_left_only || is_stereo;
+        bool load_right = is_right_only || is_stereo;
         
-        img1 = imread(left_img, IMREAD_COLOR);
-        img2 = imread(right_img, IMREAD_COLOR);
-        
-        if (img1.empty() || img2.empty()) continue;
-        
-        cvtColor(img1, gray1, COLOR_BGR2GRAY);
-        cvtColor(img2, gray2, COLOR_BGR2GRAY);
-        
-        bool found1 = findChessboardCorners(img1, board_size, corners1,
-                                           CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
-        bool found2 = findChessboardCorners(img2, board_size, corners2,
-                                           CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
-        
-        if (found1) {
-            cornerSubPix(gray1, corners1, Size(5, 5), Size(-1, -1),
-                        TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 0.01));
-        }
-        if (found2) {
-            cornerSubPix(gray2, corners2, Size(5, 5), Size(-1, -1),
-                        TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 0.01));
+        if (load_left) {
+            sprintf(left_img, "%s/%s%d.%s", img_dir, leftimg_filename, i, extension);
+            img1 = imread(left_img, IMREAD_COLOR);
+            if (img1.empty()) continue;
+            cvtColor(img1, gray1, COLOR_BGR2GRAY);
         }
         
-        if (found1 && found2) {
+        if (load_right) {
+            sprintf(right_img, "%s/%s%d.%s", img_dir, rightimg_filename, i, extension);
+            img2 = imread(right_img, IMREAD_COLOR);
+            if (img2.empty()) continue;
+            cvtColor(img2, gray2, COLOR_BGR2GRAY);
+        }
+        
+        bool found1 = false, found2 = false;
+        
+        if (load_left) {
+            found1 = findChessboardCorners(img1, board_size, corners1,
+                                           CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
+            if (found1) {
+                cornerSubPix(gray1, corners1, Size(5, 5), Size(-1, -1),
+                            TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 0.01));
+            }
+        }
+        
+        if (load_right) {
+            found2 = findChessboardCorners(img2, board_size, corners2,
+                                           CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
+            if (found2) {
+                cornerSubPix(gray2, corners2, Size(5, 5), Size(-1, -1),
+                            TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 0.01));
+            }
+        }
+        
+        bool detection_ok = (mono_mode && (found1 || found2)) || (is_stereo && found1 && found2);
+        
+        if (detection_ok) {
             vector<Point3d> obj;
             for (int r = 0; r < board_height; ++r) {
                 for (int c = 0; c < board_width; ++c) {
@@ -334,15 +393,23 @@ int main(int argc, char const *argv[])
                 }
             }
             
-            vector<Point2d> v1, v2;
-            for (size_t j = 0; j < corners1.size(); j++) {
-                v1.push_back(Point2d(corners1[j].x, corners1[j].y));
-                v2.push_back(Point2d(corners2[j].x, corners2[j].y));
+            obj_pts_init.push_back(obj);
+            
+            if (found1 || is_stereo) {
+                vector<Point2d> v1;
+                for (size_t j = 0; j < corners1.size(); j++) {
+                    v1.push_back(Point2d(corners1[j].x, corners1[j].y));
+                }
+                left_pts_init.push_back(v1);
             }
             
-            obj_pts_init.push_back(obj);
-            left_pts_init.push_back(v1);
-            right_pts_init.push_back(v2);
+            if (found2 || is_stereo) {
+                vector<Point2d> v2;
+                for (size_t j = 0; j < corners2.size(); j++) {
+                    v2.push_back(Point2d(corners2[j].x, corners2[j].y));
+                }
+                right_pts_init.push_back(v2);
+            }
         }
     }
     
@@ -355,23 +422,39 @@ int main(int argc, char const *argv[])
     printf("Initial calibration: %zu image pairs\n", obj_pts_init.size());
     fflush(stdout);
     
-    // Validate we have enough image pairs for calibration
+    // Validate we have enough images for calibration
     if (obj_pts_init.size() < 3) {
-        cerr << "Error: Need at least 3 image pairs for stereo calibration, got " << obj_pts_init.size() << endl;
+        cerr << "Error: Need at least 3 images for calibration, got " << obj_pts_init.size() << endl;
         cerr.flush();
         return 1;
     }
     
     // Validate image points data
     for (size_t i = 0; i < obj_pts_init.size(); i++) {
-        if (obj_pts_init[i].size() != left_pts_init[i].size() || 
-            obj_pts_init[i].size() != right_pts_init[i].size()) {
-            cerr << "Error: Mismatched point counts at image pair " << i << endl;
-            cerr.flush();
-            return 1;
+        if (mono_mode) {
+            // In mono mode, check only the active camera
+            size_t expected_size = obj_pts_init[i].size();
+            if (is_left_only && left_pts_init[i].size() != expected_size) {
+                cerr << "Error: Mismatched point counts at image " << i << endl;
+                cerr.flush();
+                return 1;
+            }
+            if (is_right_only && right_pts_init[i].size() != expected_size) {
+                cerr << "Error: Mismatched point counts at image " << i << endl;
+                cerr.flush();
+                return 1;
+            }
+        } else {
+            // In stereo mode, check both cameras
+            if (obj_pts_init[i].size() != left_pts_init[i].size() || 
+                obj_pts_init[i].size() != right_pts_init[i].size()) {
+                cerr << "Error: Mismatched point counts at image pair " << i << endl;
+                cerr.flush();
+                return 1;
+            }
         }
         if (obj_pts_init[i].size() < 4) {
-            cerr << "Error: Not enough points at image pair " << i << " (got " << obj_pts_init[i].size() << ")" << endl;
+            cerr << "Error: Not enough points at image " << i << " (got " << obj_pts_init[i].size() << ")" << endl;
             cerr.flush();
             return 1;
         }
