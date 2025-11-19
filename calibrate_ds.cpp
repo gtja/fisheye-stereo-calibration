@@ -13,6 +13,7 @@
 #include <cstring>
 #include <sys/stat.h>
 #include <libgen.h>
+#include <unistd.h>
 #include "popt_pp.h"
 #include "double_sphere.h"
 #include "kb4_model.h"
@@ -875,6 +876,9 @@ int main(int argc, char const *argv[])
         fs << "k6" << ds_params.k6;
         fs << "}";
         fs.release();
+        
+        // Ensure file is fully written to disk
+        sync();
         
         printf("Mono calibration saved successfully to %s\n", output_file);
         printf("Note: For better accuracy, run Bundle Adjustment with full DS model\n");
@@ -1788,6 +1792,9 @@ int main(int argc, char const *argv[])
     }
     
     fs.release();
+    
+    // Ensure file is fully written to disk
+    sync();
     
     printf("\n========== Calibration Complete ==========\n");
     printf("Double-Sphere Model Results:\n");
