@@ -638,11 +638,13 @@ int main(int argc, char const *argv[])
                                   TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
                 fisheye_success = true;
                 printf("KB4 fisheye calibration succeeded for left camera\n");
+                fflush(stdout);
                 // Set right camera parameters to left for consistency (won't be used)
                 K2_kb4 = K1_kb4;
                 D2_kb4 = D1_kb4;
             } catch (const cv::Exception& e) {
                 printf("Fisheye model failed for left camera: %s\n", e.what());
+                fflush(stdout);
             }
         } else {  // is_right_only
             printf("Attempting fisheye::calibrate for right camera with %zu images...\n", obj_pts_init.size());
@@ -654,11 +656,13 @@ int main(int argc, char const *argv[])
                                   TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 1e-5));
                 fisheye_success = true;
                 printf("KB4 fisheye calibration succeeded for right camera\n");
+                fflush(stdout);
                 // Set left camera parameters to right for consistency (won't be used)
                 K1_kb4 = K2_kb4;
                 D1_kb4 = D2_kb4;
             } catch (const cv::Exception& e) {
                 printf("Fisheye model failed for right camera: %s\n", e.what());
+                fflush(stdout);
             }
         }
     } else {
@@ -796,8 +800,10 @@ int main(int argc, char const *argv[])
     
     if (fisheye_success) {
         printf("KB4 calibration complete\n");
+        fflush(stdout);
     } else {
         printf("Initial calibration complete (using omnidir model)\n");
+        fflush(stdout);
     }
     if (is_left_only || !mono_mode) {
         printf("  Left camera: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n", 
@@ -815,6 +821,8 @@ int main(int argc, char const *argv[])
     
     // In mono mode, we skip the rest and save just the intrinsics
     if (mono_mode) {
+        printf("\n[DEBUG] Entering mono mode file save section\n");
+        fflush(stdout);
         printf("\nMono calibration complete. Saving results to %s...\n", 
                out_file ? out_file : (is_left_only ? "left_ds.yml" : "right_ds.yml"));
         fflush(stdout);
@@ -847,11 +855,21 @@ int main(int argc, char const *argv[])
         ds_params.k5 = 0.0;
         ds_params.k6 = 0.0;
         
+        printf("[DEBUG] DS params initialized: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n", 
+               ds_params.fx, ds_params.fy, ds_params.cx, ds_params.cy);
+        fflush(stdout);
+        
+        printf("[DEBUG] Ensuring output directory exists for: %s\n", output_file);
+        fflush(stdout);
+        
         // Ensure output directory exists
         if (!ensure_output_directory(output_file)) {
             cerr << "Error: Cannot create output directory for: " << output_file << endl;
             return 1;
         }
+        
+        printf("[DEBUG] Opening file for writing\n");
+        fflush(stdout);
         
         FileStorage fs(output_file, FileStorage::WRITE);
         if (!fs.isOpened()) {
@@ -875,22 +893,34 @@ int main(int argc, char const *argv[])
         fs << "k5" << ds_params.k5;
         fs << "k6" << ds_params.k6;
         fs << "}";
+        
+        printf("[DEBUG] Releasing FileStorage\n");
+        fflush(stdout);
+        
         fs.release();
+        
+        printf("[DEBUG] Syncing filesystem\n");
+        fflush(stdout);
         
         // Ensure file is fully written to disk
         sync();
         
+        printf("[DEBUG] Starting file verification\n");
+        fflush(stdout);
+        
         // Verify that the file was created and is readable
         // This is a workaround for potential race conditions with file system sync
-        int max_retries = 10;
+        int max_retries = 20;  // Increased from 10 to 20 for better reliability
         bool file_exists = false;
         for (int retry = 0; retry < max_retries; retry++) {
             if (access(output_file, F_OK) == 0 && access(output_file, R_OK) == 0) {
                 file_exists = true;
+                printf("[DEBUG] File verified on retry %d\n", retry);
+                fflush(stdout);
                 break;
             }
-            // Wait a short time before retrying (10ms)
-            usleep(10000);
+            // Wait a short time before retrying (50ms - increased from 10ms)
+            usleep(50000);
         }
         
         if (!file_exists) {
@@ -1817,15 +1847,17 @@ int main(int argc, char const *argv[])
     
     // Verify that the file was created and is readable
     // This is a workaround for potential race conditions with file system sync
-    int max_retries = 10;
+    int max_retries = 20;  // Increased from 10 to 20 for better reliability
     bool file_exists = false;
     for (int retry = 0; retry < max_retries; retry++) {
         if (access(out_file, F_OK) == 0 && access(out_file, R_OK) == 0) {
             file_exists = true;
+            printf("[DEBUG] File verified on retry %d\n", retry);
+            fflush(stdout);
             break;
         }
-        // Wait a short time before retrying (10ms)
-        usleep(10000);
+        // Wait a short time before retrying (50ms - increased from 10ms)
+        usleep(50000);
     }
     
     if (!file_exists) {
