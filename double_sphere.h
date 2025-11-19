@@ -574,16 +574,15 @@ inline int calculateRectificationError(
     double rect_strength = 1.0;  // 1.0 = full rectification, 0.0 = no rectification
     
     if (approx_fov_deg > 200.0) {
-        // Ultra extreme wide-angle lens (FOV > 200°): use stronger rectification (80%)
-        // Increased from 0.25 to 0.80 to expand visible cone from 130° to ~180°
-        rect_strength = 0.80;
+        // Ultra extreme wide-angle lens (FOV > 200°): target ~150° rectified FOV
+        // Moderate rectification strength to balance coverage and accuracy
+        rect_strength = 0.60;
     } else if (approx_fov_deg > 170.0) {
-        // Extreme wide-angle lens (FOV > 170°): use strong rectification (75%)
-        // Increased from 0.30 to 0.75 to better handle wide FOV
-        rect_strength = 0.75;
+        // Extreme wide-angle lens (FOV > 170°): target ~150° rectified FOV
+        // Optimized for better valid point ratio
+        rect_strength = 0.60;
     } else if (approx_fov_deg > 130.0) {
-        // Wide-angle lens (FOV > 130°): use moderate rectification (60%)
-        // Increased from 0.40 to 0.60 for better coverage
+        // Wide-angle lens (FOV > 130°): target ~120° rectified FOV
         rect_strength = 0.60;
     } else if (approx_fov_deg > 100.0) {
         // Moderate wide-angle lens: use partial rectification (70%)
@@ -608,35 +607,39 @@ inline int calculateRectificationError(
     double avg_fx = (left_params.fx + right_params.fx) / 2.0;
     double avg_fy = (left_params.fy + right_params.fy) / 2.0;
     
-    // For wide-angle lenses, adjust virtual focal length based on FOV
+    // For wide-angle lenses, use fixed virtual focal length for consistent results
     // The virtual focal length determines the FOV of the rectified image
-    // For extreme wide-angle, we need to DECREASE it to expand the visible cone
-    // and allow more corner points to project into the rectified image
-    double focal_scale = 1.0;
+    // Lower focal length expands the visible cone and reduces pixel angle,
+    // which minimizes rectification error amplification
+    // Target: fx=290 px for optimal balance between coverage and accuracy
+    double virtual_fx = 290.0;
+    double virtual_fy = 290.0;
+    
     if (approx_fov_deg > 200.0) {
-        // Ultra extreme wide-angle (FOV > 200°): significantly decrease focal length
-        // Target: fx=300-350 px to expand rectified FOV to ~180° for 1600x1200 image
-        // Changed from 1.8 to 0.65-0.75 to allow edge points to be visible
-        focal_scale = 0.70;
+        // Ultra extreme wide-angle (FOV > 200°): use lower focal length
+        // fx=280-300 px expands rectified FOV while maintaining accuracy
+        virtual_fx = 290.0;
+        virtual_fy = 290.0;
     } else if (approx_fov_deg > 170.0) {
-        // Extreme wide-angle (FOV > 170°): decrease focal length for wider rectified FOV
-        // Changed from 1.5 to 0.80 to expand visible cone
-        focal_scale = 0.80;
+        // Extreme wide-angle (FOV > 170°): similar to ultra extreme
+        virtual_fx = 290.0;
+        virtual_fy = 290.0;
     } else if (approx_fov_deg > 130.0) {
-        // Wide-angle (FOV > 130°): slight decrease for better coverage
-        // Changed from 1.2 to 0.90
-        focal_scale = 0.90;
+        // Wide-angle (FOV > 130°): slightly higher focal length
+        virtual_fx = 300.0;
+        virtual_fy = 300.0;
     } else if (approx_fov_deg > 100.0) {
-        // Moderate wide-angle: keep similar to original
-        focal_scale = 1.0;
+        // Moderate wide-angle: use measured focal length
+        virtual_fx = avg_fx;
+        virtual_fy = avg_fy;
     } else {
-        // Standard lens: can use slightly increased focal length
-        focal_scale = 1.1;
+        // Standard lens: can use measured focal length or slightly higher
+        virtual_fx = avg_fx * 1.1;
+        virtual_fy = avg_fy * 1.1;
     }
     
-    VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height, 
-                                     avg_fx * focal_scale);
-    virtual_cam.fy = avg_fy * focal_scale;
+    VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height, virtual_fx);
+    virtual_cam.fy = virtual_fy;
     
     // For each 3D point, project through both cameras and measure rectification error
     for (size_t i = 0; i < object_points.size(); i++) {

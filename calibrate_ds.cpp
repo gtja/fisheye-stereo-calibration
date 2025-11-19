@@ -899,28 +899,13 @@ int main(int argc, char const *argv[])
     // fx < 400: FOV > 180° (extreme)
     // fx < 500: FOV > 150° (wide-angle)
     
+    // Keep rectified image at original size to minimize error amplification
+    // Previously scaled up images amplified rectification errors
     cv::Size rectified_size = img1.size();
-    double size_scale = 1.0;
     
-    if (avg_fx < 250.0) {
-        // Ultra extreme wide-angle (FOV > 220°)
-        // Need significantly larger rectified image
-        size_scale = 2.0;
-    } else if (avg_fx < 400.0) {
-        // Extreme wide-angle (FOV > 180°)
-        size_scale = 1.5;
-    } else if (avg_fx < 500.0) {
-        // Wide-angle (FOV > 150°)
-        size_scale = 1.3;
-    }
-    // For standard lenses (fx >= 500), keep original size
-    
-    rectified_size.width = static_cast<int>(img1.size().width * size_scale);
-    rectified_size.height = static_cast<int>(img1.size().height * size_scale);
-    
-    printf("   Using rectified image size: %dx%d (original: %dx%d, avg_fx: %.1f, scale: %.1fx)\n", 
+    printf("   Using rectified image size: %dx%d (original: %dx%d, avg_fx: %.1f)\n", 
            rectified_size.width, rectified_size.height, 
-           img1.size().width, img1.size().height, avg_fx, size_scale);
+           img1.size().width, img1.size().height, avg_fx);
     fflush(stdout);
     
     // Compute average stereo transformation (R, T) from per-frame extrinsics
