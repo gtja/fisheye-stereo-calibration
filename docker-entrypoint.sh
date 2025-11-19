@@ -27,6 +27,25 @@ CALIBRATION_WORKFLOW=${CALIBRATION_WORKFLOW:-hand_eye}
 # Create output directory if it doesn't exist
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
+# Function to verify file creation with retry logic
+# Handles filesystem sync delays that can occur in containerized environments
+verify_file_with_retry() {
+    local file_path="$1"
+    local max_retries=10
+    local retry_delay=0.1  # 100ms between retries
+    local retry_count=0
+    
+    while [ $retry_count -lt $max_retries ]; do
+        if [ -f "$file_path" ] && [ -r "$file_path" ]; then
+            return 0
+        fi
+        sleep $retry_delay
+        retry_count=$((retry_count + 1))
+    done
+    
+    return 1
+}
+
 # Function to run three-step hand-eye calibration workflow
 run_hand_eye_workflow() {
     echo ""
@@ -63,18 +82,11 @@ run_hand_eye_workflow() {
         exit 1
     fi
     
-    # Verify that the output file was created and is readable
-    if [ ! -f "$left_mono" ]; then
-        echo "Error: Left camera calibration file was not created: $left_mono"
-        exit 1
-    fi
-    
-    # Ensure the file is fully written to disk (sync filesystem)
-    sync
-    
-    # Double-check file is readable
-    if [ ! -r "$left_mono" ]; then
-        echo "Error: Left camera calibration file is not readable: $left_mono"
+    # Verify that the output file was created and is readable (with retry logic)
+    if ! verify_file_with_retry "$left_mono"; then
+        echo "Error: Left camera calibration file was not created or not readable: $left_mono"
+        echo "Waited up to 1 second for file to become available"
+        ls -la "$(dirname "$left_mono")" 2>/dev/null || echo "Directory does not exist"
         exit 1
     fi
     
@@ -105,18 +117,11 @@ run_hand_eye_workflow() {
         exit 1
     fi
     
-    # Verify that the output file was created and is readable
-    if [ ! -f "$right_mono" ]; then
-        echo "Error: Right camera calibration file was not created: $right_mono"
-        exit 1
-    fi
-    
-    # Ensure the file is fully written to disk (sync filesystem)
-    sync
-    
-    # Double-check file is readable
-    if [ ! -r "$right_mono" ]; then
-        echo "Error: Right camera calibration file is not readable: $right_mono"
+    # Verify that the output file was created and is readable (with retry logic)
+    if ! verify_file_with_retry "$right_mono"; then
+        echo "Error: Right camera calibration file was not created or not readable: $right_mono"
+        echo "Waited up to 1 second for file to become available"
+        ls -la "$(dirname "$right_mono")" 2>/dev/null || echo "Directory does not exist"
         exit 1
     fi
     
@@ -149,18 +154,11 @@ run_hand_eye_workflow() {
         exit 1
     fi
     
-    # Verify that the output file was created and is readable
-    if [ ! -f "$handeye_file" ]; then
-        echo "Error: Hand-eye calibration file was not created: $handeye_file"
-        exit 1
-    fi
-    
-    # Ensure the file is fully written to disk (sync filesystem)
-    sync
-    
-    # Double-check file is readable
-    if [ ! -r "$handeye_file" ]; then
-        echo "Error: Hand-eye calibration file is not readable: $handeye_file"
+    # Verify that the output file was created and is readable (with retry logic)
+    if ! verify_file_with_retry "$handeye_file"; then
+        echo "Error: Hand-eye calibration file was not created or not readable: $handeye_file"
+        echo "Waited up to 1 second for file to become available"
+        ls -la "$(dirname "$handeye_file")" 2>/dev/null || echo "Directory does not exist"
         exit 1
     fi
     
