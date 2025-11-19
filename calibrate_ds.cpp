@@ -883,7 +883,11 @@ int main(int argc, char const *argv[])
     fflush(stdout);
     
     // Define rectified image size (virtual pinhole image)
-    cv::Size rectified_size(960, 720);
+    // Use the original image size as a reasonable default to ensure all points can fit
+    // This is especially important for wide-angle fisheye cameras
+    cv::Size rectified_size = img1.size();
+    printf("   Using rectified image size: %dx%d\n", rectified_size.width, rectified_size.height);
+    fflush(stdout);
     
     // Compute average stereo transformation (R, T) from per-frame extrinsics
     // We'll use the median transformation for robustness
@@ -940,10 +944,22 @@ int main(int argc, char const *argv[])
     );
     
     printf("   Evaluated %d corner points\n", num_rect_points);
-    printf("   Average y-difference: %.4f pixels [threshold: < 0.3 pixel]\n", avg_rectification_err);
-    printf("   Maximum y-difference: %.4f pixels [threshold: < 0.7 pixel]\n", max_rectification_err);
-    printf("   Status: %s\n", 
-           (avg_rectification_err < 0.3 && max_rectification_err < 0.7) ? "PASS" : "FAIL");
+    if (num_rect_points > 0) {
+        printf("   Average y-difference: %.4f pixels [threshold: < 0.3 pixel]\n", avg_rectification_err);
+        printf("   Maximum y-difference: %.4f pixels [threshold: < 0.7 pixel]\n", max_rectification_err);
+        printf("   Status: %s\n", 
+               (avg_rectification_err < 0.3 && max_rectification_err < 0.7) ? "PASS" : "FAIL");
+    } else {
+        printf("   Average y-difference: N/A (no valid points)\n");
+        printf("   Maximum y-difference: N/A (no valid points)\n");
+        printf("   Status: SKIPPED (insufficient data for evaluation)\n");
+        printf("\n   Note: Rectification error could not be evaluated due to no valid corner points.\n");
+        printf("   This may occur with:\n");
+        printf("     - Extreme wide-angle lenses (FOV > 200°)\n");
+        printf("     - Very small rectified image size\n");
+        printf("     - Incorrect camera extrinsics\n");
+        printf("   The monocular and stereo reprojection errors are still valid metrics.\n");
+    }
     fflush(stdout);
     
     // 5. Baseline Distance
@@ -1041,8 +1057,14 @@ int main(int argc, char const *argv[])
     fs << "monocular_reprojection_error_avg" << avg_monocular_err;
     fs << "stereo_reprojection_error_avg" << avg_stereo_err;
     fs << "stereo_reprojection_error_max" << max_stereo_err;
-    fs << "rectification_error_avg" << avg_rectification_err;
-    fs << "rectification_error_max" << max_rectification_err;
+    fs << "rectification_error_num_points" << num_rect_points;
+    if (num_rect_points > 0) {
+        fs << "rectification_error_avg" << avg_rectification_err;
+        fs << "rectification_error_max" << max_rectification_err;
+    } else {
+        fs << "rectification_error_avg" << -1.0;  // Indicate N/A
+        fs << "rectification_error_max" << -1.0;  // Indicate N/A
+    }
     fs << "calibrated_baseline" << calibrated_baseline;
     if (physical_baseline > 0) {
         fs << "physical_baseline" << physical_baseline;

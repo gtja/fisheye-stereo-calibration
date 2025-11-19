@@ -443,6 +443,12 @@ inline int calculateRectificationError(
     max_error = 0.0;
     int valid_points = 0;
     
+    // Diagnostic counters for debugging
+    int total_points = 0;
+    int points_behind_camera = 0;
+    int points_negative_z_rect = 0;
+    int points_out_of_bounds = 0;
+    
     // Compute rectification rotation matrices
     cv::Mat baseline = T.clone();
     double baseline_norm = cv::norm(baseline);
@@ -493,11 +499,21 @@ inline int calculateRectificationError(
     cv::Mat R_rect_right = R_rect_left * R;
     
     // Virtual pinhole camera parameters
-    VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height);
+    // Use average focal length from the calibrated cameras to better match the projection
+    double avg_fx = (left_params.fx + right_params.fx) / 2.0;
+    double avg_fy = (left_params.fy + right_params.fy) / 2.0;
+    // Scale down by a factor to fit more points in the rectified image
+    // This helps avoid out-of-bounds issues while still maintaining resolution
+    double focal_scale = 0.8;
+    VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height, 
+                                     avg_fx * focal_scale);
+    virtual_cam.fy = avg_fy * focal_scale;
     
     // For each 3D point, project through both cameras and measure rectification error
     for (size_t i = 0; i < object_points.size(); i++) {
         for (size_t j = 0; j < object_points[i].size(); j++) {
+            total_points++;
+            
             // Transform 3D point to left camera coordinates using optimized extrinsics
             double point_world[3] = {object_points[i][j].x, object_points[i][j].y, object_points[i][j].z};
             double point_camera_left[3];
@@ -515,6 +531,7 @@ inline int calculateRectificationError(
             
             // Skip points behind camera
             if (point_camera_left[2] <= 0 || point_camera_right[2] <= 0) {
+                points_behind_camera++;
                 continue;
             }
             
@@ -551,7 +568,11 @@ inline int calculateRectificationError(
                         max_error = y_diff;
                     }
                     valid_points++;
+                } else {
+                    points_out_of_bounds++;
                 }
+            } else {
+                points_negative_z_rect++;
             }
         }
     }
@@ -562,6 +583,17 @@ inline int calculateRectificationError(
         avg_error /= valid_points;
     } else {
         std::cerr << "Warning: No valid points found for rectification error calculation" << std::endl;
+        std::cerr << "   Total corner points: " << total_points << std::endl;
+        std::cerr << "   Points behind camera: " << points_behind_camera << std::endl;
+        std::cerr << "   Points with negative Z after rectification: " << points_negative_z_rect << std::endl;
+        std::cerr << "   Points outside rectified image bounds: " << points_out_of_bounds << std::endl;
+        std::cerr << "   Rectified image size: " << rectified_size.width << "x" << rectified_size.height << std::endl;
+        std::cerr << "   Virtual camera: fx=" << virtual_cam.fx << ", fy=" << virtual_cam.fy 
+                  << ", cx=" << virtual_cam.cx << ", cy=" << virtual_cam.cy << std::endl;
+        std::cerr << "Suggestions:" << std::endl;
+        std::cerr << "   - If all points are out of bounds, the rectified image size may be too small" << std::endl;
+        std::cerr << "   - If all points have negative Z, the rectification rotation may be incorrect" << std::endl;
+        std::cerr << "   - If all points are behind camera, the extrinsics may be incorrect" << std::endl;
     }
     
     return valid_points;
