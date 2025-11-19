@@ -1,0 +1,44 @@
+name: Fisheye Stereo Calibration CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  calibration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build calibration docker image
+        run: |
+          docker build -t fisheye-stereo-calibration .
+
+      - name: Prepare test images directory
+        run: |
+          mkdir -p imgs2
+          # You can add commands here to copy or download test images into imgs2
+          # For example: cp -r test_images/* imgs2/
+
+      - name: Run calibration container (hand-eye, double-sphere)
+        run: |
+          docker run \
+            -e CALIBRATION_MODEL=double_sphere \
+            -e CALIBRATION_WORKFLOW=hand_eye \
+            -v ${{ github.workspace }}/imgs2:/data/imgs \
+            fisheye-stereo-calibration \
+            -w 11 -h 8 -s 0.025 -d /data/imgs/ -l left -r right -e bmp -b 0.06
+
+      - name: Upload output (optional)
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: calibration-output
+          path: output/
