@@ -22,7 +22,7 @@ CALIBRATION_MODEL=${CALIBRATION_MODEL:-standard}
 # Choose calibration workflow: "traditional" or "hand_eye"
 # hand_eye workflow: monocular calibration -> hand-eye -> stereo bundle adjustment
 # traditional workflow: direct stereo calibration
-CALIBRATION_WORKFLOW=${CALIBRATION_WORKFLOW:-traditional}
+CALIBRATION_WORKFLOW=${CALIBRATION_WORKFLOW:-hand-eye}
 
 # Create output directory if it doesn't exist
 mkdir -p "$(dirname "$OUTPUT_FILE")"
