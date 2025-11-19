@@ -322,6 +322,12 @@ int main(int argc, char const *argv[])
     xi2 = xi2_mat.at<double>(0);
     
     cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
+    if (!fs1.isOpened()) {
+        cerr << "Error: Cannot open output file for writing: " << out_file << endl;
+        cerr << "Please check that the output directory exists and you have write permissions." << endl;
+        return 1;
+    }
+    
     fs1 << "model_type" << "omnidir";
     fs1 << "K1" << K1_mat;
     fs1 << "K2" << K2_mat;
@@ -356,6 +362,12 @@ int main(int argc, char const *argv[])
         cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 1e-5));
 
     cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
+    if (!fs1.isOpened()) {
+        cerr << "Error: Cannot open output file for writing: " << out_file << endl;
+        cerr << "Please check that the output directory exists and you have write permissions." << endl;
+        return 1;
+    }
+    
     fs1 << "model_type" << "fisheye";
     fs1 << "K1" << Mat(K1);
     fs1 << "K2" << Mat(K2);

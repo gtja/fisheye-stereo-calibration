@@ -306,6 +306,12 @@ int main(int argc, char const *argv[])
     // Save to file
     printf("\nSaving hand-eye calibration to %s...\n", out_file);
     FileStorage fs(out_file, FileStorage::WRITE);
+    if (!fs.isOpened()) {
+        cerr << "Error: Cannot open output file for writing: " << out_file << endl;
+        cerr << "Please check that the output directory exists and you have write permissions." << endl;
+        return 1;
+    }
+    
     fs << "method" << "hand_eye_tsai";
     fs << "num_frames" << (int)rvecs_left.size();
     fs << "R" << R_handeye;

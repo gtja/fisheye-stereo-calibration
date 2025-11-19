@@ -790,6 +790,12 @@ int main(int argc, char const *argv[])
         ds_params.k6 = 0.0;
         
         FileStorage fs(output_file, FileStorage::WRITE);
+        if (!fs.isOpened()) {
+            cerr << "Error: Cannot open output file for writing: " << output_file << endl;
+            cerr << "Please check that the output directory exists and you have write permissions." << endl;
+            return 1;
+        }
+        
         fs << "model_type" << "double_sphere";
         fs << "camera" << "{";
         fs << "fx" << ds_params.fx;
@@ -1636,6 +1642,12 @@ int main(int argc, char const *argv[])
     fflush(stdout);
     
     FileStorage fs(out_file, FileStorage::WRITE);
+    if (!fs.isOpened()) {
+        cerr << "Error: Cannot open output file for writing: " << out_file << endl;
+        cerr << "Please check that the output directory exists and you have write permissions." << endl;
+        return 1;
+    }
+    
     fs << "model_type" << "double_sphere";
     
     fs << "left_camera" << "{";
