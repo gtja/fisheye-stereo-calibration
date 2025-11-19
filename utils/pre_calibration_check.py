@@ -295,8 +295,9 @@ def main():
     if args.output_dir:
         output_dir = Path(args.output_dir)
     else:
-        # Default: create a _filtered directory next to the original
-        output_dir = Path(str(image_dir).rstrip('/') + '_filtered')
+        # Default: create a _filtered subdirectory inside the image directory
+        # This ensures it's accessible when the image directory is mounted in Docker
+        output_dir = image_dir / 'imgs_filtered'
     
     print(f"Input directory:  {image_dir}")
     print(f"Output directory: {output_dir}")
