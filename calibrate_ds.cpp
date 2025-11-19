@@ -906,15 +906,17 @@ int main(int argc, char const *argv[])
         
         // Verify that the file was created and is readable
         // This is a workaround for potential race conditions with file system sync
-        int max_retries = 10;
+        int max_retries = 20;  // Increased from 10 to 20 for better reliability
         bool file_exists = false;
         for (int retry = 0; retry < max_retries; retry++) {
             if (access(output_file, F_OK) == 0 && access(output_file, R_OK) == 0) {
                 file_exists = true;
+                printf("[DEBUG] File verified on retry %d\n", retry);
+                fflush(stdout);
                 break;
             }
-            // Wait a short time before retrying (10ms)
-            usleep(10000);
+            // Wait a short time before retrying (50ms - increased from 10ms)
+            usleep(50000);
         }
         
         if (!file_exists) {
@@ -1841,15 +1843,17 @@ int main(int argc, char const *argv[])
     
     // Verify that the file was created and is readable
     // This is a workaround for potential race conditions with file system sync
-    int max_retries = 10;
+    int max_retries = 20;  // Increased from 10 to 20 for better reliability
     bool file_exists = false;
     for (int retry = 0; retry < max_retries; retry++) {
         if (access(out_file, F_OK) == 0 && access(out_file, R_OK) == 0) {
             file_exists = true;
+            printf("[DEBUG] File verified on retry %d\n", retry);
+            fflush(stdout);
             break;
         }
-        // Wait a short time before retrying (10ms)
-        usleep(10000);
+        // Wait a short time before retrying (50ms - increased from 10ms)
+        usleep(50000);
     }
     
     if (!file_exists) {
