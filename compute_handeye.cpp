@@ -8,11 +8,52 @@
 #include <string>
 #include <dirent.h>
 #include <algorithm>
+#include <sys/stat.h>
+#include <libgen.h>
 #include "popt_pp.h"
 #include "double_sphere.h"
 
 using namespace std;
 using namespace cv;
+
+// Helper function to create directory recursively
+bool create_directory_recursive(const char* path) {
+  char tmp[256];
+  char *p = NULL;
+  size_t len;
+  
+  snprintf(tmp, sizeof(tmp), "%s", path);
+  len = strlen(tmp);
+  if (tmp[len - 1] == '/')
+    tmp[len - 1] = 0;
+  
+  for (p = tmp + 1; *p; p++) {
+    if (*p == '/') {
+      *p = 0;
+      if (mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0) {
+        if (errno != EEXIST) {
+          return false;
+        }
+      }
+      *p = '/';
+    }
+  }
+  
+  if (mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0) {
+    if (errno != EEXIST) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Helper function to ensure output directory exists for a file path
+bool ensure_output_directory(const char* filepath) {
+  char tmp[256];
+  snprintf(tmp, sizeof(tmp), "%s", filepath);
+  char* dir = dirname(tmp);
+  return create_directory_recursive(dir);
+}
 
 // Helper function to find all matching image files in a directory
 vector<int> find_image_indices(const char* img_dir, const char* prefix, const char* extension) {
@@ -305,10 +346,17 @@ int main(int argc, char const *argv[])
     
     // Save to file
     printf("\nSaving hand-eye calibration to %s...\n", out_file);
+    
+    // Ensure output directory exists
+    if (!ensure_output_directory(out_file)) {
+        cerr << "Error: Cannot create output directory for: " << out_file << endl;
+        return 1;
+    }
+    
     FileStorage fs(out_file, FileStorage::WRITE);
     if (!fs.isOpened()) {
         cerr << "Error: Cannot open output file for writing: " << out_file << endl;
-        cerr << "Please check that the output directory exists and you have write permissions." << endl;
+        cerr << "Please check that you have write permissions." << endl;
         return 1;
     }
     

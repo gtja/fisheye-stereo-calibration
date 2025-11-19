@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <sys/stat.h>
+#include <libgen.h>
 #include "popt_pp.h"
 
 using namespace std;
@@ -20,6 +22,45 @@ vector< Point2f > corners1, corners2;
 vector< vector< Point2d > > left_img_points, right_img_points;
 
 Mat img1, img2, gray1, gray2, spl1, spl2;
+
+// Helper function to create directory recursively
+bool create_directory_recursive(const char* path) {
+  char tmp[256];
+  char *p = NULL;
+  size_t len;
+  
+  snprintf(tmp, sizeof(tmp), "%s", path);
+  len = strlen(tmp);
+  if (tmp[len - 1] == '/')
+    tmp[len - 1] = 0;
+  
+  for (p = tmp + 1; *p; p++) {
+    if (*p == '/') {
+      *p = 0;
+      if (mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0) {
+        if (errno != EEXIST) {
+          return false;
+        }
+      }
+      *p = '/';
+    }
+  }
+  
+  if (mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0) {
+    if (errno != EEXIST) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Helper function to ensure output directory exists for a file path
+bool ensure_output_directory(const char* filepath) {
+  char tmp[256];
+  snprintf(tmp, sizeof(tmp), "%s", filepath);
+  char* dir = dirname(tmp);
+  return create_directory_recursive(dir);
+}
 
 // Helper function to find all matching image files in a directory
 vector<int> find_image_indices(const char* img_dir, const char* prefix, const char* extension) {
@@ -321,10 +362,16 @@ int main(int argc, char const *argv[])
     xi1 = xi1_mat.at<double>(0);
     xi2 = xi2_mat.at<double>(0);
     
+    // Ensure output directory exists
+    if (!ensure_output_directory(out_file)) {
+        cerr << "Error: Cannot create output directory for: " << out_file << endl;
+        return 1;
+    }
+    
     cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
     if (!fs1.isOpened()) {
         cerr << "Error: Cannot open output file for writing: " << out_file << endl;
-        cerr << "Please check that the output directory exists and you have write permissions." << endl;
+        cerr << "Please check that you have write permissions." << endl;
         return 1;
     }
     
@@ -361,10 +408,16 @@ int main(int argc, char const *argv[])
         K1, D1, K2, D2, img1.size(), R, T, flag,
         cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 1e-5));
 
+    // Ensure output directory exists
+    if (!ensure_output_directory(out_file)) {
+        cerr << "Error: Cannot create output directory for: " << out_file << endl;
+        return 1;
+    }
+
     cv::FileStorage fs1(out_file, cv::FileStorage::WRITE);
     if (!fs1.isOpened()) {
         cerr << "Error: Cannot open output file for writing: " << out_file << endl;
-        cerr << "Please check that the output directory exists and you have write permissions." << endl;
+        cerr << "Please check that you have write permissions." << endl;
         return 1;
     }
     
