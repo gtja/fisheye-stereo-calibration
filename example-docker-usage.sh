@@ -28,11 +28,19 @@ echo "  fisheye-stereo-calibration \\"
 echo "  python3 /app/utils/corner_analysis.py /data/imgs/ --width 9 --height 6 --prefix left"
 echo ""
 
-# Workflow Step 4
-echo "Step 4: Run calibration"
+# Workflow Step 4a
+echo "Step 4a: Run traditional calibration"
 echo "Command: docker run -e CALIBRATION_MODEL=double_sphere -v ./imgs2:/data/imgs -v \$(pwd)/output:/data/output \\"
 echo "  fisheye-stereo-calibration \\"
 echo "  -w 11 -h 8 -s 0.02  -d /data/imgs/ -l left -r right -o /data/output/cam_stereo.yml"
+echo ""
+
+# Workflow Step 4b
+echo "Step 4b: Run hand-eye calibration workflow (for extreme fisheye)"
+echo "Command: docker run -e CALIBRATION_MODEL=double_sphere -e CALIBRATION_WORKFLOW=hand_eye \\"
+echo "  -v ./imgs2:/data/imgs -v \$(pwd)/output:/data/output \\"
+echo "  fisheye-stereo-calibration \\"
+echo "  -w 11 -h 8 -s 0.02  -d /data/imgs/ -l left -r right -e bmp -o /data/output/cam_stereo.yml"
 echo ""
 
 # Workflow Step 5
