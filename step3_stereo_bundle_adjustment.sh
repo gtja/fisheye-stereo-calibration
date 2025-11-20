@@ -50,7 +50,7 @@ echo "Running stereo bundle adjustment..."
 echo "Command: ./calibrate_ds -w $BOARD_WIDTH -h $BOARD_HEIGHT -s $SQUARE_SIZE -d $IMG_DIR -l $LEFT_PREFIX -r $RIGHT_PREFIX -e $IMAGE_EXTENSION --init-extrinsic $HANDEYE_FILE --joint-ba -o $OUTPUT_FILE"
 echo ""
 
-./calibrate_ds \
+if ! ./calibrate_ds \
     -w "$BOARD_WIDTH" \
     -h "$BOARD_HEIGHT" \
     -s "$SQUARE_SIZE" \
@@ -60,9 +60,7 @@ echo ""
     -e "$IMAGE_EXTENSION" \
     --init-extrinsic "$HANDEYE_FILE" \
     --joint-ba \
-    -o "$OUTPUT_FILE"
-
-if [ $? -ne 0 ]; then
+    -o "$OUTPUT_FILE"; then
     echo "Error: Stereo bundle adjustment failed"
     exit 1
 fi

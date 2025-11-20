@@ -37,7 +37,7 @@ echo "  Output directory: $OUTPUT_DIR"
 echo "  Final output file: $OUTPUT_FILE"
 echo ""
 echo "Press Enter to start, or Ctrl+C to cancel..."
-read
+read -r
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

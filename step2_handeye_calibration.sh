@@ -76,7 +76,7 @@ echo "Running hand-eye calibration..."
 echo "Command: ./compute_handeye -w $BOARD_WIDTH -h $BOARD_HEIGHT -s $SQUARE_SIZE -d $IMG_DIR -l $LEFT_PREFIX -r $RIGHT_PREFIX -e $IMAGE_EXTENSION -L $LEFT_MONO -R $RIGHT_MONO -o $HANDEYE_FILE"
 echo ""
 
-./compute_handeye \
+if ! ./compute_handeye \
     -w "$BOARD_WIDTH" \
     -h "$BOARD_HEIGHT" \
     -s "$SQUARE_SIZE" \
@@ -86,9 +86,7 @@ echo ""
     -e "$IMAGE_EXTENSION" \
     -L "$LEFT_MONO" \
     -R "$RIGHT_MONO" \
-    -o "$HANDEYE_FILE"
-
-if [ $? -ne 0 ]; then
+    -o "$HANDEYE_FILE"; then
     echo "Error: Hand-eye calibration failed"
     exit 1
 fi

@@ -65,7 +65,7 @@ echo ""
 echo "Command: ./calibrate_ds -w $BOARD_WIDTH -h $BOARD_HEIGHT -s $SQUARE_SIZE -d $IMG_DIR -l $LEFT_PREFIX -e $IMAGE_EXTENSION --mono -o $LEFT_MONO"
 echo ""
 
-./calibrate_ds \
+if ! ./calibrate_ds \
     -w "$BOARD_WIDTH" \
     -h "$BOARD_HEIGHT" \
     -s "$SQUARE_SIZE" \
@@ -73,9 +73,7 @@ echo ""
     -l "$LEFT_PREFIX" \
     -e "$IMAGE_EXTENSION" \
     --mono \
-    -o "$LEFT_MONO"
-
-if [ $? -ne 0 ]; then
+    -o "$LEFT_MONO"; then
     echo "Error: Left camera monocular calibration failed"
     exit 1
 fi
@@ -100,7 +98,7 @@ echo ""
 echo "Command: ./calibrate_ds -w $BOARD_WIDTH -h $BOARD_HEIGHT -s $SQUARE_SIZE -d $IMG_DIR -r $RIGHT_PREFIX -e $IMAGE_EXTENSION --mono -o $RIGHT_MONO"
 echo ""
 
-./calibrate_ds \
+if ! ./calibrate_ds \
     -w "$BOARD_WIDTH" \
     -h "$BOARD_HEIGHT" \
     -s "$SQUARE_SIZE" \
@@ -108,9 +106,7 @@ echo ""
     -r "$RIGHT_PREFIX" \
     -e "$IMAGE_EXTENSION" \
     --mono \
-    -o "$RIGHT_MONO"
-
-if [ $? -ne 0 ]; then
+    -o "$RIGHT_MONO"; then
     echo "Error: Right camera monocular calibration failed"
     exit 1
 fi
