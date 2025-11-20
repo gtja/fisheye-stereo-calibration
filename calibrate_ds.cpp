@@ -648,7 +648,59 @@ int main(int argc, char const *argv[])
                 fflush(stdout);
             } catch (const cv::Exception& e) {
                 printf("Fisheye model failed for left camera: %s\n", e.what());
+                printf("Falling back to omnidir (MEI) model for left camera...\n");
                 fflush(stdout);
+                
+                // Fallback to omnidir model for extreme wide-angle lenses
+                vector<vector<Point2f>> left_pts_init_f;
+                vector<vector<Point3f>> obj_pts_init_f;
+                
+                for (size_t i = 0; i < obj_pts_init.size(); i++) {
+                    vector<Point3f> obj_f;
+                    for (size_t j = 0; j < obj_pts_init[i].size(); j++) {
+                        obj_f.push_back(Point3f((float)obj_pts_init[i][j].x, (float)obj_pts_init[i][j].y, (float)obj_pts_init[i][j].z));
+                    }
+                    obj_pts_init_f.push_back(obj_f);
+                }
+                
+                for (size_t i = 0; i < left_pts_init.size(); i++) {
+                    vector<Point2f> v1;
+                    for (size_t j = 0; j < left_pts_init[i].size(); j++) {
+                        v1.push_back(Point2f((float)left_pts_init[i][j].x, (float)left_pts_init[i][j].y));
+                    }
+                    left_pts_init_f.push_back(v1);
+                }
+                
+                Mat K1_mat, D1_mat, xi1_mat;
+                vector<Vec3d> rvecs_left, tvecs_left;
+                int omni_flags = 0;
+                omni_flags |= omnidir::CALIB_FIX_SKEW;
+                
+                try {
+                    printf("  Calibrating left camera with omnidir...\n");
+                    fflush(stdout);
+                    double rms_left = omnidir::calibrate(obj_pts_init_f, left_pts_init_f, img1.size(),
+                                                         K1_mat, xi1_mat, D1_mat, rvecs_left, tvecs_left,
+                                                         omni_flags,
+                                                         TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
+                    printf("  Left camera RMS: %.4f\n", rms_left);
+                    printf("  Left mirror parameter: xi1=%.6f\n", xi1_mat.at<double>(0));
+                    
+                    // Convert omnidir results to KB4 format
+                    K1_kb4 = Matx33d((double*)K1_mat.data);
+                    D1_kb4 = Vec4d(D1_mat.at<double>(0), D1_mat.at<double>(1), 
+                                  D1_mat.at<double>(2), D1_mat.at<double>(3));
+                    K2_kb4 = K1_kb4;
+                    D2_kb4 = D1_kb4;
+                    
+                    printf("Omnidir calibration succeeded for left camera\n");
+                    fflush(stdout);
+                } catch (const cv::Exception& e2) {
+                    cerr << "Error: Both fisheye and omnidir calibration failed for left camera!" << endl;
+                    cerr << "Omnidir error: " << e2.what() << endl;
+                    cerr.flush();
+                    return 1;
+                }
             }
         } else {  // is_right_only
             printf("Attempting fisheye::calibrate for right camera with %zu images...\n", obj_pts_init.size());
@@ -666,7 +718,59 @@ int main(int argc, char const *argv[])
                 D1_kb4 = D2_kb4;
             } catch (const cv::Exception& e) {
                 printf("Fisheye model failed for right camera: %s\n", e.what());
+                printf("Falling back to omnidir (MEI) model for right camera...\n");
                 fflush(stdout);
+                
+                // Fallback to omnidir model for extreme wide-angle lenses
+                vector<vector<Point2f>> right_pts_init_f;
+                vector<vector<Point3f>> obj_pts_init_f;
+                
+                for (size_t i = 0; i < obj_pts_init.size(); i++) {
+                    vector<Point3f> obj_f;
+                    for (size_t j = 0; j < obj_pts_init[i].size(); j++) {
+                        obj_f.push_back(Point3f((float)obj_pts_init[i][j].x, (float)obj_pts_init[i][j].y, (float)obj_pts_init[i][j].z));
+                    }
+                    obj_pts_init_f.push_back(obj_f);
+                }
+                
+                for (size_t i = 0; i < right_pts_init.size(); i++) {
+                    vector<Point2f> v2;
+                    for (size_t j = 0; j < right_pts_init[i].size(); j++) {
+                        v2.push_back(Point2f((float)right_pts_init[i][j].x, (float)right_pts_init[i][j].y));
+                    }
+                    right_pts_init_f.push_back(v2);
+                }
+                
+                Mat K2_mat, D2_mat, xi2_mat;
+                vector<Vec3d> rvecs_right, tvecs_right;
+                int omni_flags = 0;
+                omni_flags |= omnidir::CALIB_FIX_SKEW;
+                
+                try {
+                    printf("  Calibrating right camera with omnidir...\n");
+                    fflush(stdout);
+                    double rms_right = omnidir::calibrate(obj_pts_init_f, right_pts_init_f, img2.size(),
+                                                          K2_mat, xi2_mat, D2_mat, rvecs_right, tvecs_right,
+                                                          omni_flags,
+                                                          TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 200, 1e-6));
+                    printf("  Right camera RMS: %.4f\n", rms_right);
+                    printf("  Right mirror parameter: xi2=%.6f\n", xi2_mat.at<double>(0));
+                    
+                    // Convert omnidir results to KB4 format
+                    K2_kb4 = Matx33d((double*)K2_mat.data);
+                    D2_kb4 = Vec4d(D2_mat.at<double>(0), D2_mat.at<double>(1), 
+                                  D2_mat.at<double>(2), D2_mat.at<double>(3));
+                    K1_kb4 = K2_kb4;
+                    D1_kb4 = D2_kb4;
+                    
+                    printf("Omnidir calibration succeeded for right camera\n");
+                    fflush(stdout);
+                } catch (const cv::Exception& e2) {
+                    cerr << "Error: Both fisheye and omnidir calibration failed for right camera!" << endl;
+                    cerr << "Omnidir error: " << e2.what() << endl;
+                    cerr.flush();
+                    return 1;
+                }
             }
         }
         printf("[DEBUG] Exiting mono_mode block, mono_mode = %d\n", mono_mode);
