@@ -2051,8 +2051,10 @@ int main(int argc, char const *argv[])
     }
     fflush(stdout);
     
+    // 保存校正映射图到单独的文件夹
     // Save rectification maps to a separate folder
     printf("\nGenerating and saving rectification maps...\n");
+    printf("生成并保存校正映射图...\n");
     fflush(stdout);
     
     // Create rectification maps directory path
@@ -2075,8 +2077,10 @@ int main(int argc, char const *argv[])
         printf("   Skipping rectification map saving.\n");
     } else {
         printf("   Rectification maps directory: %s\n", rect_maps_dir);
+        printf("   校正映射图目录: %s\n", rect_maps_dir);
         
         // Generate rectification maps using the average stereo transformation
+        // 使用平均立体变换生成校正映射图
         cv::Mat map_left_x, map_left_y, map_right_x, map_right_y;
         
         double_sphere::createStereoRectificationMaps(
@@ -2146,6 +2150,7 @@ int main(int argc, char const *argv[])
         }
         
         printf("   Rectification maps saved successfully!\n");
+        printf("   校正映射图保存成功！\n");
     }
     fflush(stdout);
     
