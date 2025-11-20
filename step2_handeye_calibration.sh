@@ -5,6 +5,19 @@ set -e
 # This script performs hand-eye calibration using the monocular calibration results
 # from step 1 to compute the stereo extrinsics (T_right_left).
 
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -w) BOARD_WIDTH="$2"; shift 2 ;;
+        -h) BOARD_HEIGHT="$2"; shift 2 ;;
+        -s) SQUARE_SIZE="$2"; shift 2 ;;
+        -d) IMG_DIR="$2"; shift 2 ;;
+        -e) IMAGE_EXTENSION="$2"; shift 2 ;;
+        -o) OUTPUT_DIR="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+
 # Default values
 BOARD_WIDTH=${BOARD_WIDTH:-11}
 BOARD_HEIGHT=${BOARD_HEIGHT:-8}

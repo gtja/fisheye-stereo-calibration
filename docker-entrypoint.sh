@@ -263,9 +263,22 @@ if [ $# -gt 0 ]; then
                 -l) LEFT_PREFIX="${args[$((i+1))]}" ;;
                 -r) RIGHT_PREFIX="${args[$((i+1))]}" ;;
                 -e) IMAGE_EXTENSION="${args[$((i+1))]}" ;;
-                -o) OUTPUT_FILE="${args[$((i+1))]}" ;;
+                -o) OUTPUT_PARAM="${args[$((i+1))]}" ;;
             esac
         done
+        
+        # Handle -o parameter: if it's a directory, construct full file path
+        if [ -n "$OUTPUT_PARAM" ]; then
+            if [ -d "$OUTPUT_PARAM" ] || [[ "$OUTPUT_PARAM" != *.yml && "$OUTPUT_PARAM" != *.yaml ]]; then
+                # It's a directory or not a YAML file - treat as output directory
+                OUTPUT_DIR="$OUTPUT_PARAM"
+                OUTPUT_FILE="${OUTPUT_DIR}/cam_stereo.yml"
+            else
+                # It's a file path
+                OUTPUT_FILE="$OUTPUT_PARAM"
+                OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
+            fi
+        fi
         
         # Run quality checks before calibration
         # This removes invalid images from the directory, so calibration will only find valid ones
@@ -305,6 +318,19 @@ if [ $# -gt 0 ]; then
             done
         fi
         
+        # Update -o parameter in args to use full file path (not just directory)
+        for i in "${!args[@]}"; do
+            if [ "${args[$i]}" = "-o" ]; then
+                # Check if the next value is a directory or a file path
+                next_idx=$((i+1))
+                if [ -d "${args[$next_idx]}" ] || [[ "${args[$next_idx]}" != *.yml && "${args[$next_idx]}" != *.yaml ]]; then
+                    # It's a directory - convert to full file path
+                    args[$next_idx]="${args[$next_idx]}/cam_stereo.yml"
+                fi
+                break
+            fi
+        done
+        
         # Check if hand-eye workflow is requested
         if [ "$CALIBRATION_WORKFLOW" = "hand_eye" ]; then
             run_hand_eye_workflow
@@ -338,9 +364,29 @@ if [ $# -gt 0 ]; then
                 -l) LEFT_PREFIX="${args[$((i+1))]}" ;;
                 -r) RIGHT_PREFIX="${args[$((i+1))]}" ;;
                 -e) IMAGE_EXTENSION="${args[$((i+1))]}" ;;
-                -o) OUTPUT_FILE="${args[$((i+1))]}" ;;
+                -o) OUTPUT_PARAM="${args[$((i+1))]}" ;;
             esac
         done
+        
+        # Handle -o parameter: if it's a directory, construct full file path
+        if [ -n "$OUTPUT_PARAM" ]; then
+            if [ -d "$OUTPUT_PARAM" ] || [[ "$OUTPUT_PARAM" != *.yml && "$OUTPUT_PARAM" != *.yaml ]]; then
+                # It's a directory or not a YAML file - treat as output directory
+                OUTPUT_DIR="$OUTPUT_PARAM"
+                OUTPUT_FILE="${OUTPUT_DIR}/cam_stereo.yml"
+                # Update the -o parameter in args array
+                for i in "${!args[@]}"; do
+                    if [ "${args[$i]}" = "-o" ]; then
+                        args[$((i+1))]="$OUTPUT_FILE"
+                        break
+                    fi
+                done
+            else
+                # It's a file path
+                OUTPUT_FILE="$OUTPUT_PARAM"
+                OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
+            fi
+        fi
         
         # Check if hand-eye workflow is requested
         if [ "$CALIBRATION_WORKFLOW" = "hand_eye" ]; then
