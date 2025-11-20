@@ -81,7 +81,12 @@ fi
 # Verify that the output file was created and is readable (with retry logic)
 if ! verify_file_with_retry "$LEFT_MONO"; then
     echo "Error: Left camera calibration file was not created or not readable: $LEFT_MONO"
-    echo "Waited up to 1 second for file to become available"
+    echo "This is a known issue with the file-saving logic in mono mode."
+    echo "Please rebuild the Docker image with the latest code fix."
+    echo ""
+    echo "Workaround: You can manually copy a generated calibration file if available,"
+    echo "or re-run with stereo calibration mode (both -l and -r)."
+    echo ""
     ls -la "$OUTPUT_DIR" 2>/dev/null || echo "Directory does not exist"
     exit 1
 fi

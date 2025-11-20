@@ -646,6 +646,57 @@ int main(int argc, char const *argv[])
                 D2_kb4 = D1_kb4;
                 printf("[DEBUG] Successfully set K2_kb4 and D2_kb4\n");
                 fflush(stdout);
+                
+                // EARLY EXIT: Save file immediately after successful left mono calibration
+                printf("[DEBUG] EARLY EXIT: Saving mono calibration file for left camera\n");
+                fflush(stdout);
+                
+                if (!ensure_output_directory(out_file)) {
+                    cerr << "Error: Cannot create output directory for: " << out_file << endl;
+                    return 1;
+                }
+                
+                FileStorage fs(out_file, FileStorage::WRITE);
+                if (!fs.isOpened()) {
+                    cerr << "Error: Cannot open output file for writing: " << out_file << endl;
+                    return 1;
+                }
+                
+                double_sphere::DoubleSphereParams ds_params;
+                ds_params.fx = K1_kb4(0,0);
+                ds_params.fy = K1_kb4(1,1);
+                ds_params.cx = K1_kb4(0,2);
+                ds_params.cy = K1_kb4(1,2);
+                ds_params.xi = 0.0;
+                ds_params.alpha = 0.5;
+                ds_params.k1 = D1_kb4[0];
+                ds_params.k2 = D1_kb4[1];
+                ds_params.k3 = D1_kb4[2];
+                ds_params.k4 = D1_kb4[3];
+                ds_params.k5 = 0.0;
+                ds_params.k6 = 0.0;
+                
+                fs << "model_type" << "double_sphere";
+                fs << "camera" << "{";
+                fs << "fx" << ds_params.fx;
+                fs << "fy" << ds_params.fy;
+                fs << "cx" << ds_params.cx;
+                fs << "cy" << ds_params.cy;
+                fs << "xi" << ds_params.xi;
+                fs << "alpha" << ds_params.alpha;
+                fs << "k1" << ds_params.k1;
+                fs << "k2" << ds_params.k2;
+                fs << "k3" << ds_params.k3;
+                fs << "k4" << ds_params.k4;
+                fs << "k5" << ds_params.k5;
+                fs << "k6" << ds_params.k6;
+                fs << "}";
+                fs.release();
+                sync();
+                
+                printf("Mono calibration saved successfully to %s\n", out_file);
+                fflush(stdout);
+                return 0;
             } catch (const cv::Exception& e) {
                 printf("Fisheye model failed for left camera: %s\n", e.what());
                 printf("Falling back to omnidir (MEI) model for left camera...\n");
@@ -716,6 +767,57 @@ int main(int argc, char const *argv[])
                 // Set left camera parameters to right for consistency (won't be used)
                 K1_kb4 = K2_kb4;
                 D1_kb4 = D2_kb4;
+                
+                // EARLY EXIT: Save file immediately after successful right mono calibration
+                printf("[DEBUG] EARLY EXIT: Saving mono calibration file for right camera\n");
+                fflush(stdout);
+                
+                if (!ensure_output_directory(out_file)) {
+                    cerr << "Error: Cannot create output directory for: " << out_file << endl;
+                    return 1;
+                }
+                
+                FileStorage fs(out_file, FileStorage::WRITE);
+                if (!fs.isOpened()) {
+                    cerr << "Error: Cannot open output file for writing: " << out_file << endl;
+                    return 1;
+                }
+                
+                double_sphere::DoubleSphereParams ds_params;
+                ds_params.fx = K2_kb4(0,0);
+                ds_params.fy = K2_kb4(1,1);
+                ds_params.cx = K2_kb4(0,2);
+                ds_params.cy = K2_kb4(1,2);
+                ds_params.xi = 0.0;
+                ds_params.alpha = 0.5;
+                ds_params.k1 = D2_kb4[0];
+                ds_params.k2 = D2_kb4[1];
+                ds_params.k3 = D2_kb4[2];
+                ds_params.k4 = D2_kb4[3];
+                ds_params.k5 = 0.0;
+                ds_params.k6 = 0.0;
+                
+                fs << "model_type" << "double_sphere";
+                fs << "camera" << "{";
+                fs << "fx" << ds_params.fx;
+                fs << "fy" << ds_params.fy;
+                fs << "cx" << ds_params.cx;
+                fs << "cy" << ds_params.cy;
+                fs << "xi" << ds_params.xi;
+                fs << "alpha" << ds_params.alpha;
+                fs << "k1" << ds_params.k1;
+                fs << "k2" << ds_params.k2;
+                fs << "k3" << ds_params.k3;
+                fs << "k4" << ds_params.k4;
+                fs << "k5" << ds_params.k5;
+                fs << "k6" << ds_params.k6;
+                fs << "}";
+                fs.release();
+                sync();
+                
+                printf("Mono calibration saved successfully to %s\n", out_file);
+                fflush(stdout);
+                return 0;
             } catch (const cv::Exception& e) {
                 printf("Fisheye model failed for right camera: %s\n", e.what());
                 printf("Falling back to omnidir (MEI) model for right camera...\n");
@@ -950,19 +1052,31 @@ int main(int argc, char const *argv[])
     printf("[DEBUG] mono_mode = %d, is_left_only = %d, is_right_only = %d\n", mono_mode, is_left_only, is_right_only);
     fflush(stdout);
     
+    printf("[DEBUG] BEFORE mono_mode check at line 954: mono_mode = %d\n", mono_mode);
+    fflush(stdout);
+    
     // In mono mode, we skip the rest and save just the intrinsics
     if (mono_mode) {
-        printf("\n[DEBUG] Entering mono mode file save section\n");
+        printf("[DEBUG] INSIDE mono_mode check - about to save file\n");
         fflush(stdout);
+        printf("\n[DEBUG] Entering mono mode file save section\n");
+        printf("[DEBUG] mono_mode=%d, is_left_only=%d, is_right_only=%d\n", mono_mode, is_left_only, is_right_only);
+        printf("[DEBUG] out_file pointer: %p\n", (void*)out_file);
+        if (out_file) printf("[DEBUG] out_file value: '%s'\n", out_file);
+        fflush(stdout);
+        
         printf("\nMono calibration complete. Saving results to %s...\n", 
                out_file ? out_file : (is_left_only ? "left_ds.yml" : "right_ds.yml"));
         fflush(stdout);
         
         const char* output_file = out_file ? out_file : (is_left_only ? "left_ds.yml" : "right_ds.yml");
+        printf("[DEBUG] Final output_file: '%s'\n", output_file);
+        fflush(stdout);
         
         // Initialize DS parameters from KB4
         double_sphere::DoubleSphereParams ds_params;
         if (is_left_only) {
+            printf("[DEBUG] Using left camera parameters\n");
             ds_params.fx = kb4_left.fx;
             ds_params.fy = kb4_left.fy;
             ds_params.cx = kb4_left.cx;
@@ -972,6 +1086,7 @@ int main(int argc, char const *argv[])
             ds_params.k3 = kb4_left.k3;
             ds_params.k4 = kb4_left.k4;
         } else {
+            printf("[DEBUG] Using right camera parameters\n");
             ds_params.fx = kb4_right.fx;
             ds_params.fy = kb4_right.fy;
             ds_params.cx = kb4_right.cx;
@@ -995,20 +1110,31 @@ int main(int argc, char const *argv[])
         
         // Ensure output directory exists
         if (!ensure_output_directory(output_file)) {
+            printf("[DEBUG] ensure_output_directory returned false\n");
             cerr << "Error: Cannot create output directory for: " << output_file << endl;
             return 1;
         }
+        printf("[DEBUG] Output directory ensured successfully\n");
+        fflush(stdout);
         
-        printf("[DEBUG] Opening file for writing\n");
+        printf("[DEBUG] Opening file for writing: '%s'\n", output_file);
         fflush(stdout);
         
         FileStorage fs(output_file, FileStorage::WRITE);
+        printf("[DEBUG] FileStorage object created\n");
+        fflush(stdout);
+        
         if (!fs.isOpened()) {
+            printf("[DEBUG] FileStorage failed to open\n");
             cerr << "Error: Cannot open output file for writing: " << output_file << endl;
             cerr << "Please check that you have write permissions." << endl;
             return 1;
         }
+        printf("[DEBUG] FileStorage opened successfully\n");
+        fflush(stdout);
         
+        printf("[DEBUG] Writing data to FileStorage\n");
+        fflush(stdout);
         fs << "model_type" << "double_sphere";
         fs << "camera" << "{";
         fs << "fx" << ds_params.fx;
@@ -1024,17 +1150,23 @@ int main(int argc, char const *argv[])
         fs << "k5" << ds_params.k5;
         fs << "k6" << ds_params.k6;
         fs << "}";
+        printf("[DEBUG] Data written to FileStorage\n");
+        fflush(stdout);
         
         printf("[DEBUG] Releasing FileStorage\n");
         fflush(stdout);
         
         fs.release();
+        printf("[DEBUG] FileStorage released\n");
+        fflush(stdout);
         
         printf("[DEBUG] Syncing filesystem\n");
         fflush(stdout);
         
         // Ensure file is fully written to disk
         sync();
+        printf("[DEBUG] Filesystem synced\n");
+        fflush(stdout);
         
         printf("[DEBUG] Starting file verification\n");
         fflush(stdout);
@@ -1044,7 +1176,10 @@ int main(int argc, char const *argv[])
         int max_retries = 20;  // Increased from 10 to 20 for better reliability
         bool file_exists = false;
         for (int retry = 0; retry < max_retries; retry++) {
-            if (access(output_file, F_OK) == 0 && access(output_file, R_OK) == 0) {
+            int f_ok = access(output_file, F_OK);
+            int r_ok = access(output_file, R_OK);
+            printf("[DEBUG] Retry %d: F_OK=%d, R_OK=%d\n", retry, f_ok, r_ok);
+            if (f_ok == 0 && r_ok == 0) {
                 file_exists = true;
                 printf("[DEBUG] File verified on retry %d\n", retry);
                 fflush(stdout);
@@ -1055,6 +1190,7 @@ int main(int argc, char const *argv[])
         }
         
         if (!file_exists) {
+            printf("[DEBUG] File verification failed after %d retries\n", max_retries);
             cerr << "Error: Failed to verify file creation: " << output_file << endl;
             cerr << "The file was written but could not be verified to exist." << endl;
             return 1;
