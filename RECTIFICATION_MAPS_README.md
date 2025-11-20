@@ -104,6 +104,28 @@ cv2.imwrite("left_rectified.jpg", left_rectified)
 cv2.imwrite("right_rectified.jpg", right_rectified)
 ```
 
+## Example Script
+
+A complete example script is provided: `example_rectify.py`
+
+This script demonstrates how to:
+- Load rectification maps from the generated files
+- Apply rectification to stereo image pairs
+- Save rectified images with horizontal alignment lines
+
+**Usage:**
+```bash
+python3 example_rectify.py calib_results/rectification_maps imgs/left1.jpg imgs/right1.jpg rectified_output
+```
+
+The script will:
+1. Load the rectification maps
+2. Display the map dimensions and parameters
+3. Rectify both images
+4. Save individual rectified images
+5. Create a side-by-side comparison
+6. Generate a version with horizontal lines to visualize alignment
+
 ## Notes
 
 - Rectification maps are generated using the Double-Sphere camera model
