@@ -2051,6 +2051,104 @@ int main(int argc, char const *argv[])
     }
     fflush(stdout);
     
+    // Save rectification maps to a separate folder
+    printf("\nGenerating and saving rectification maps...\n");
+    fflush(stdout);
+    
+    // Create rectification maps directory path
+    char rect_maps_dir[512];
+    char tmp_out_file[256];
+    snprintf(tmp_out_file, sizeof(tmp_out_file), "%s", out_file);
+    
+    // Extract directory path from output file
+    char* last_slash = strrchr(tmp_out_file, '/');
+    if (last_slash != NULL) {
+        *last_slash = '\0';
+        snprintf(rect_maps_dir, sizeof(rect_maps_dir), "%s/rectification_maps", tmp_out_file);
+    } else {
+        snprintf(rect_maps_dir, sizeof(rect_maps_dir), "rectification_maps");
+    }
+    
+    // Create the rectification_maps directory
+    if (!create_directory_recursive(rect_maps_dir)) {
+        printf("   Warning: Could not create rectification_maps directory: %s\n", rect_maps_dir);
+        printf("   Skipping rectification map saving.\n");
+    } else {
+        printf("   Rectification maps directory: %s\n", rect_maps_dir);
+        
+        // Generate rectification maps using the average stereo transformation
+        cv::Mat map_left_x, map_left_y, map_right_x, map_right_y;
+        
+        double_sphere::createStereoRectificationMaps(
+            ds_left, ds_right,
+            R_stereo_avg, T_stereo_avg,
+            img1.size(), rectified_size,
+            map_left_x, map_left_y,
+            map_right_x, map_right_y
+        );
+        
+        // Save rectification maps to YAML files
+        char map_file_path[512];
+        
+        // Save left maps
+        snprintf(map_file_path, sizeof(map_file_path), "%s/map_left_x.yml", rect_maps_dir);
+        cv::FileStorage fs_left_x(map_file_path, cv::FileStorage::WRITE);
+        if (fs_left_x.isOpened()) {
+            fs_left_x << "map_left_x" << map_left_x;
+            fs_left_x.release();
+            printf("   Saved: %s\n", map_file_path);
+        }
+        
+        snprintf(map_file_path, sizeof(map_file_path), "%s/map_left_y.yml", rect_maps_dir);
+        cv::FileStorage fs_left_y(map_file_path, cv::FileStorage::WRITE);
+        if (fs_left_y.isOpened()) {
+            fs_left_y << "map_left_y" << map_left_y;
+            fs_left_y.release();
+            printf("   Saved: %s\n", map_file_path);
+        }
+        
+        // Save right maps
+        snprintf(map_file_path, sizeof(map_file_path), "%s/map_right_x.yml", rect_maps_dir);
+        cv::FileStorage fs_right_x(map_file_path, cv::FileStorage::WRITE);
+        if (fs_right_x.isOpened()) {
+            fs_right_x << "map_right_x" << map_right_x;
+            fs_right_x.release();
+            printf("   Saved: %s\n", map_file_path);
+        }
+        
+        snprintf(map_file_path, sizeof(map_file_path), "%s/map_right_y.yml", rect_maps_dir);
+        cv::FileStorage fs_right_y(map_file_path, cv::FileStorage::WRITE);
+        if (fs_right_y.isOpened()) {
+            fs_right_y << "map_right_y" << map_right_y;
+            fs_right_y.release();
+            printf("   Saved: %s\n", map_file_path);
+        }
+        
+        // Save rectification parameters for reference
+        snprintf(map_file_path, sizeof(map_file_path), "%s/rectification_params.yml", rect_maps_dir);
+        cv::FileStorage fs_params(map_file_path, cv::FileStorage::WRITE);
+        if (fs_params.isOpened()) {
+            fs_params << "image_size" << "{";
+            fs_params << "width" << img1.size().width;
+            fs_params << "height" << img1.size().height;
+            fs_params << "}";
+            
+            fs_params << "rectified_size" << "{";
+            fs_params << "width" << rectified_size.width;
+            fs_params << "height" << rectified_size.height;
+            fs_params << "}";
+            
+            fs_params << "R_stereo" << R_stereo_avg;
+            fs_params << "T_stereo" << T_stereo_avg;
+            
+            fs_params.release();
+            printf("   Saved: %s\n", map_file_path);
+        }
+        
+        printf("   Rectification maps saved successfully!\n");
+    }
+    fflush(stdout);
+    
     // 5. Baseline Distance
     // Compute average baseline from per-frame stereo transformations
     double sum_baseline = 0.0;
