@@ -14,6 +14,7 @@ while [[ $# -gt 0 ]]; do
         -d) IMG_DIR="$2"; shift 2 ;;
         -e) IMAGE_EXTENSION="$2"; shift 2 ;;
         -o) OUTPUT_DIR="$2"; shift 2 ;;
+        --skip-image-checks) shift ;; # Ignore this flag - it's only used by step2/step3
         *) shift ;;
     esac
 done

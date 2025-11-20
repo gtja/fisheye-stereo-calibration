@@ -16,11 +16,12 @@ echo "Testing Complete Calibration Workflow"
 echo "=========================================="
 echo ""
 
-# Check if Docker image exists
-if ! docker image inspect fisheye-stereo-calibration &>/dev/null; then
-    echo "[INFO] Building Docker image..."
-    docker build --memory 4g --memory-swap 4g -t fisheye-stereo-calibration .
-fi
+# # Check if Docker image exists
+# if ! docker image inspect fisheye-stereo-calibration &>/dev/null; then
+#     echo "[INFO] Building Docker image..."
+#     docker build --memory 4g --memory-swap 4g -t fisheye-stereo-calibration .
+# fi
+docker build --memory 4g --memory-swap 4g -t fisheye-stereo-calibration .
 
 # Test Step 1: Monocular Calibration
 echo "[STEP 1] Running monocular calibration..."

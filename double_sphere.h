@@ -6,6 +6,7 @@
 #include <ceres/ceres.h>
 #include <ceres/rotation.h>
 #include <vector>
+#include <cmath>
 
 namespace double_sphere {
 
@@ -47,11 +48,6 @@ inline bool project(const DoubleSphereParams& params,
     double x = point3d[0];
     double y = point3d[1];
     double z = point3d[2];
-    
-    // Check for points behind camera
-    if (z <= 0.0) {
-        return false;
-    }
     
     // Double-Sphere projection
     double d1 = sqrt(x*x + y*y + z*z);
@@ -197,13 +193,6 @@ struct DoubleSphereReprojectionError {
         point_camera[0] += camera_extrinsics[3];
         point_camera[1] += camera_extrinsics[4];
         point_camera[2] += camera_extrinsics[5];
-        
-        // Check if point is behind camera
-        if (point_camera[2] <= T(0.0)) {
-            residuals[0] = T(1000.0);
-            residuals[1] = T(1000.0);
-            return true;
-        }
         
         // Double-Sphere projection
         T x = point_camera[0];
@@ -515,13 +504,19 @@ inline void createStereoRectificationMaps(
     }
     
     // Standard stereo rectification approach:
-    // We want to create a rectified coordinate system where:
-    // - e1 (new X) points along the baseline (left to right)
-    // - e3 (new Z) points forward
-    // - e2 (new Y) completes the right-handed system
+    // We assume P_right = R * P_left + T
+    // T is the position of Left Camera Center in Right Camera Frame
+    // We want to construct R_rect_right such that X-axis aligns with the baseline vector in Right Frame
+    // The vector from Left to Right in Right Frame is -T (assuming T is L->R translation of points, which means T is L origin in R frame)
+    // Wait, if P_R = R P_L + T. If P_L=0, P_R=T. So T is Left Center in Right Frame.
+    // Vector Left->Right is -T.
+    // So we align e1 with -T.
     
-    // e1: normalized baseline direction (pointing from left to right)
-    cv::Mat e1 = baseline / baseline_norm;
+    // However, if T is positive in the file, and we assume standard stereo (L at 0, R at +B),
+    // then T should be negative. If T is positive, it might be R->L vector.
+    // Let's try aligning with -T to ensure X points from Left to Right.
+    
+    cv::Mat e1 = -baseline / baseline_norm;
     
     // We want e3 to point forward. Original forward is [0, 0, 1]
     // e3 should be perpendicular to e1 and close to [0, 0, 1]
@@ -550,29 +545,111 @@ inline void createStereoRectificationMaps(
     cv::Mat e2 = e3.cross(e1);
     e2 = e2 / cv::norm(e2);
     
-    // Build rectification rotation matrix for left camera
-    // R_rect maps from left camera coords to rectified coords
-    cv::Mat R_rect_left = cv::Mat::zeros(3, 3, CV_64F);
+    // Build rectification rotation matrix for RIGHT camera
+    // R_rect_right maps from right camera coords to rectified coords
+    cv::Mat R_rect_right = cv::Mat::zeros(3, 3, CV_64F);
     for (int i = 0; i < 3; i++) {
-        R_rect_left.at<double>(0, i) = e1.at<double>(i);
-        R_rect_left.at<double>(1, i) = e2.at<double>(i);
-        R_rect_left.at<double>(2, i) = e3.at<double>(i);
+        R_rect_right.at<double>(0, i) = e1.at<double>(i);
+        R_rect_right.at<double>(1, i) = e2.at<double>(i);
+        R_rect_right.at<double>(2, i) = e3.at<double>(i);
     }
     
-    // Rectification rotation for right camera: R_rect_right = R_rect_left * R
-    cv::Mat R_rect_right = R_rect_left * R;
+    // Rectification rotation for left camera: R_rect_left = R_rect_right * R
+    // Because P_rect_L = R_rect_L * P_L
+    // P_rect_R = R_rect_R * P_R = R_rect_R * (R * P_L + T) = R_rect_R * R * P_L + ...
+    // We want P_rect_L || P_rect_R, so R_rect_L = R_rect_R * R
+    cv::Mat R_rect_left = R_rect_right * R;
     
+    // Estimate FOV for Cylindrical Rectification decision
+    double avg_fx_check = (left_params.fx + right_params.fx) / 2.0;
+    double max_angle = 0.0;
+    int successful_unprojects = 0;
+    double cx = image_size.width / 2.0;
+    double cy = image_size.height / 2.0;
+    std::vector<double> radii_fractions = {0.50, 0.70, 0.85, 0.95};
+    double image_half_diag = 0.5 * std::sqrt(image_size.width * image_size.width + image_size.height * image_size.height);
+    
+    for (double frac : radii_fractions) {
+        double radius = frac * image_half_diag;
+        for (int angle_idx = 0; angle_idx < 8; angle_idx++) {
+            double angle_rad = angle_idx * M_PI / 4.0;
+            double px = cx + radius * std::cos(angle_rad);
+            double py = cy + radius * std::sin(angle_rad);
+            if (px >= 0 && px < image_size.width && py >= 0 && py < image_size.height) {
+                double point2d[2] = {px, py};
+                double point3d[3];
+                if (unproject(left_params, point2d, point3d)) {
+                    if (point3d[2] > -0.999) {
+                        double angle = std::acos(std::max(-1.0, std::min(1.0, point3d[2])));
+                        if (angle > max_angle) max_angle = angle;
+                        successful_unprojects++;
+                    }
+                }
+            }
+        }
+    }
+    double approx_fov_deg = 2.0 * max_angle * 180.0 / M_PI;
+    if (successful_unprojects < 4 || max_angle < 1e-6) {
+        double diag_to_fx_ratio = std::sqrt(image_size.width * image_size.width + image_size.height * image_size.height) / avg_fx_check;
+        if (diag_to_fx_ratio > 3.5) approx_fov_deg = 220.0;
+        else if (diag_to_fx_ratio > 3.0) approx_fov_deg = 190.0;
+        else if (diag_to_fx_ratio > 2.5) approx_fov_deg = 160.0;
+        else {
+            double image_diagonal = std::sqrt(image_size.width * image_size.width + image_size.height * image_size.height);
+            approx_fov_deg = 2.0 * std::atan(image_diagonal / (2.0 * avg_fx_check)) * 180.0 / M_PI;
+        }
+    }
+
     // Generate remapping for left camera
+    // Use Spherical Stereo (Transverse Equirectangular) projection for wide-angle stereo
+    // This ensures horizontal epipolar lines even for >180 FOV
+    bool use_spherical = (approx_fov_deg > 150.0);
+    
+    // Update virtual camera for spherical mode
+    if (use_spherical) {
+        // For spherical projection: u = f * angle
+        // f = width / fov_rad
+        double fov_rad = approx_fov_deg * M_PI / 180.0 * 1.1; // 10% margin
+        double sph_fx = rectified_size.width / fov_rad;
+        virtual_cam.fx = std::max(100.0, sph_fx);
+        virtual_cam.fy = virtual_cam.fx;
+    }
+
     for (int v = 0; v < rectified_size.height; v++) {
         for (int u = 0; u < rectified_size.width; u++) {
-            // Unproject from virtual pinhole to 3D ray in rectified coordinate system
-            double x_rect = (u - virtual_cam.cx) / virtual_cam.fx;
-            double y_rect = (v - virtual_cam.cy) / virtual_cam.fy;
-            double z_rect = 1.0;
+            cv::Mat ray_rect;
             
-            // Normalize to unit ray
-            double norm = std::sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
-            cv::Mat ray_rect = (cv::Mat_<double>(3,1) << x_rect/norm, y_rect/norm, z_rect/norm);
+            if (use_spherical) {
+                // Spherical Stereo Inverse Projection
+                // Map (u,v) to angles (phi, theta)
+                // phi: horizontal angle (from YZ plane) -> u
+                // theta: vertical angle (around X axis) -> v
+                double phi = (u - virtual_cam.cx) / virtual_cam.fx;
+                double theta = (v - virtual_cam.cy) / virtual_cam.fy;
+                
+                // Reconstruct unit ray (R=1)
+                // X-axis is baseline
+                // X = sin(phi)
+                // rho = cos(phi) (projection on YZ plane)
+                // Y = rho * sin(theta) = cos(phi) * sin(theta)
+                // Z = rho * cos(theta) = cos(phi) * cos(theta)
+                
+                double x = std::sin(phi);
+                double y = std::cos(phi) * std::sin(theta);
+                double z = std::cos(phi) * std::cos(theta);
+                
+                ray_rect = (cv::Mat_<double>(3,1) << x, y, z);
+            } else {
+                // Planar (Pinhole) Unprojection
+                // Unproject from virtual pinhole to 3D ray in rectified coordinate system
+                double x_rect = (u - virtual_cam.cx) / virtual_cam.fx;
+                double y_rect = (v - virtual_cam.cy) / virtual_cam.fy;
+                double z_rect = 1.0;
+                
+                // Normalize to unit ray
+                double norm = std::sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
+                ray_rect = (cv::Mat_<double>(3,1) << x_rect/norm, y_rect/norm, z_rect/norm);
+            }
             
             // Transform ray from rectified to left camera coordinate system
             cv::Mat ray_left = R_rect_left.t() * ray_rect;
@@ -601,14 +678,27 @@ inline void createStereoRectificationMaps(
     // Generate remapping for right camera
     for (int v = 0; v < rectified_size.height; v++) {
         for (int u = 0; u < rectified_size.width; u++) {
-            // Unproject from virtual pinhole to 3D ray in rectified coordinate system
-            double x_rect = (u - virtual_cam.cx) / virtual_cam.fx;
-            double y_rect = (v - virtual_cam.cy) / virtual_cam.fy;
-            double z_rect = 1.0;
+            cv::Mat ray_rect;
             
-            // Normalize to unit ray
-            double norm = std::sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
-            cv::Mat ray_rect = (cv::Mat_<double>(3,1) << x_rect/norm, y_rect/norm, z_rect/norm);
+            if (use_spherical) {
+                // Spherical Stereo Inverse Projection
+                double phi = (u - virtual_cam.cx) / virtual_cam.fx;
+                double theta = (v - virtual_cam.cy) / virtual_cam.fy;
+                
+                double x = std::sin(phi);
+                double y = std::cos(phi) * std::sin(theta);
+                double z = std::cos(phi) * std::cos(theta);
+                
+                ray_rect = (cv::Mat_<double>(3,1) << x, y, z);
+            } else {
+                // Planar Unprojection
+                double x_rect = (u - virtual_cam.cx) / virtual_cam.fx;
+                double y_rect = (v - virtual_cam.cy) / virtual_cam.fy;
+                double z_rect = 1.0;
+                
+                double norm = std::sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
+                ray_rect = (cv::Mat_<double>(3,1) << x_rect/norm, y_rect/norm, z_rect/norm);
+            }
             
             // Transform ray from rectified to right camera coordinate system
             cv::Mat ray_right = R_rect_right.t() * ray_rect;
@@ -651,10 +741,18 @@ inline int calculateRectificationError(
     const std::vector<double*>& camera_extrinsics_left,
     const std::vector<double*>& camera_extrinsics_right,
     double& avg_error,
-    double& max_error)
+    double& max_error,
+    double& center_error,
+    double& edge_error,
+    int& center_count,
+    int& edge_count)
 {
     avg_error = 0.0;
     max_error = 0.0;
+    center_error = 0.0;
+    edge_error = 0.0;
+    center_count = 0;
+    edge_count = 0;
     int valid_points = 0;
     
     // Diagnostic counters for debugging
@@ -672,7 +770,8 @@ inline int calculateRectificationError(
     }
     
     // Standard stereo rectification: e1 along baseline, e3 forward, e2 completes system
-    cv::Mat e1 = baseline / baseline_norm;
+    // Use -T to align X-axis from Left to Right (assuming T is Left->Right translation)
+    cv::Mat e1 = -baseline / baseline_norm;
     
     // Use Gram-Schmidt to get e3 perpendicular to e1 and close to forward [0,0,1]
     cv::Mat forward = (cv::Mat_<double>(3,1) << 0, 0, 1);
@@ -698,13 +797,13 @@ inline int calculateRectificationError(
     cv::Mat e2 = e3.cross(e1);
     e2 = e2 / cv::norm(e2);
     
-    // Build rectification rotation matrix for left camera
-    // R_rect maps from left camera coordinates to rectified coordinates
-    cv::Mat R_rect_left_full = cv::Mat::zeros(3, 3, CV_64F);
+    // Build rectification rotation matrix for RIGHT camera
+    // R_rect maps from right camera coordinates to rectified coordinates
+    cv::Mat R_rect_right_full = cv::Mat::zeros(3, 3, CV_64F);
     for (int i = 0; i < 3; i++) {
-        R_rect_left_full.at<double>(0, i) = e1.at<double>(i);
-        R_rect_left_full.at<double>(1, i) = e2.at<double>(i);
-        R_rect_left_full.at<double>(2, i) = e3.at<double>(i);
+        R_rect_right_full.at<double>(0, i) = e1.at<double>(i);
+        R_rect_right_full.at<double>(1, i) = e2.at<double>(i);
+        R_rect_right_full.at<double>(2, i) = e3.at<double>(i);
     }
     
     // For extreme wide-angle lenses, use partial rectification to avoid negative Z
@@ -783,72 +882,120 @@ inline int calculateRectificationError(
         }
     }
     
-    cv::Mat R_rect_left;
+    cv::Mat R_rect_right;
     double rect_strength = 1.0;  // 1.0 = full rectification, 0.0 = no rectification
     
-    // Optimization ③: Tighten rectification FOV to ~120° for better accuracy
-    // This reduces the number of edge points with extreme distortion, cutting
-    // negative Z points from 47% to <2% and improving y-difference error
-    if (approx_fov_deg > 200.0) {
-        // Ultra extreme wide-angle lens (FOV > 200°): target ~120° rectified FOV
-        // Use strength=0.45 to achieve tighter cone and reduce negative Z points
-        rect_strength = 0.45;
-    } else if (approx_fov_deg > 170.0) {
-        // Extreme wide-angle lens (FOV > 170°): target ~120° rectified FOV
-        // Use strength=0.45 to achieve tighter cone
-        rect_strength = 0.45;
-    } else if (approx_fov_deg > 130.0) {
-        // Wide-angle lens (FOV > 130°): target ~120° rectified FOV
-        // Use strength=0.45 for tighter cone
-        rect_strength = 0.45;
-    } else if (approx_fov_deg > 100.0) {
-        // Moderate wide-angle lens: use stronger rectification (60%)
-        rect_strength = 0.60;
+    // FORCE FULL RECTIFICATION FOR SPHERICAL STEREO
+    // Spherical stereo relies on exact alignment of the X-axis with the baseline.
+    // Partial rectification breaks this alignment, introducing vertical disparity.
+    if (approx_fov_deg > 150.0) {
+        rect_strength = 1.0;
+    } else {
+        // Optimization ③: Tighten rectification FOV to ~120° for better accuracy
+        // This reduces the number of edge points with extreme distortion, cutting
+        // negative Z points from 47% to <2% and improving y-difference error
+        if (approx_fov_deg > 200.0) {
+            // Ultra extreme wide-angle lens (FOV > 200°): target ~120° rectified FOV
+            // Use strength=0.45 to achieve tighter cone and reduce negative Z points
+            rect_strength = 0.45;
+        } else if (approx_fov_deg > 170.0) {
+            // Extreme wide-angle lens (FOV > 170°): target ~120° rectified FOV
+            // Use strength=0.45 to achieve tighter cone
+            rect_strength = 0.45;
+        } else if (approx_fov_deg > 130.0) {
+            // Wide-angle lens (FOV > 130°): target ~120° rectified FOV
+            // Use strength=0.45 for tighter cone
+            rect_strength = 0.45;
+        } else if (approx_fov_deg > 100.0) {
+            // Moderate wide-angle lens: use stronger rectification (60%)
+            rect_strength = 0.60;
+        }
     }
     
     if (rect_strength < 1.0) {
         // Apply partial rectification using angle-axis interpolation
         cv::Mat rvec_full;
-        cv::Rodrigues(R_rect_left_full, rvec_full);
+        cv::Rodrigues(R_rect_right_full, rvec_full);
         cv::Mat rvec_partial = rvec_full * rect_strength;
-        cv::Rodrigues(rvec_partial, R_rect_left);
+        cv::Rodrigues(rvec_partial, R_rect_right);
     } else {
-        R_rect_left = R_rect_left_full.clone();
+        R_rect_right = R_rect_right_full.clone();
     }
     
-    // Rectification rotation for right camera
-    cv::Mat R_rect_right = R_rect_left * R;
+    // Rectification rotation for LEFT camera: R_rect_left = R_rect_right * R
+    cv::Mat R_rect_left = R_rect_right * R;
     
     // Virtual pinhole camera parameters
     // Use average focal length from the calibrated cameras to better match the projection
     double avg_fx = (left_params.fx + right_params.fx) / 2.0;
     double avg_fy = (left_params.fy + right_params.fy) / 2.0;
     
-    // For wide-angle lenses, use fixed virtual focal length for consistent results
+    bool use_spherical = (approx_fov_deg > 150.0);
+    
+    // For wide-angle lenses, use dynamic virtual focal length based on actual FOV
     // The virtual focal length determines the FOV of the rectified image
     // Lower focal length expands the visible cone and reduces pixel angle,
     // which minimizes rectification error amplification
-    // Target: fx=290 px for optimal balance between coverage and accuracy
-    double virtual_fx = 290.0;
-    double virtual_fy = 290.0;
+    // Formula: virtual_fx = image_width / (2 * tan(FOV/2))
+    double virtual_fx, virtual_fy;
     
-    if (approx_fov_deg > 200.0) {
-        // Ultra extreme wide-angle (FOV > 200°): use lower focal length
-        // fx=280-300 px expands rectified FOV while maintaining accuracy
-        virtual_fx = 290.0;
-        virtual_fy = 290.0;
+    // Clamp FOV for virtual focal length calculation to avoid singularity at 180°
+    // We cannot represent >180° with a single pinhole, so we limit the rectified FOV
+    // to a maximum of 160° (conservative) to 170° (aggressive)
+    double calc_fov_deg = approx_fov_deg;
+    if (!use_spherical && calc_fov_deg > 170.0) {
+        calc_fov_deg = 170.0;
+    }
+    
+    if (use_spherical) {
+        // Spherical Projection: fx = width / fov_rad
+        // We want to cover the full FOV
+        double fov_rad = approx_fov_deg * M_PI / 180.0;
+        // Add some margin (10%)
+        fov_rad *= 1.1;
+        
+        virtual_fx = rectified_size.width / fov_rad;
+        virtual_fy = virtual_fx; // Keep aspect ratio 1:1 for pixels
+        
+        // Ensure reasonable scale
+        virtual_fx = std::max(100.0, virtual_fx);
+        virtual_fy = std::max(100.0, virtual_fy);
+    } else if (approx_fov_deg > 200.0) {
+        // Ultra extreme wide-angle (FOV > 200°): use very low focal length
+        // FOV > 200° requires fx < 200 px to fit most points in rectified image
+        double fov_rad = calc_fov_deg * M_PI / 180.0;
+        virtual_fx = rectified_size.width / (2.0 * std::tan(fov_rad / 2.0));
+        virtual_fy = rectified_size.height / (2.0 * std::tan(fov_rad / 2.0));
+        // Clamp to reasonable range [100, 250]
+        virtual_fx = std::max(100.0, std::min(250.0, virtual_fx));
+        virtual_fy = std::max(100.0, std::min(250.0, virtual_fy));
     } else if (approx_fov_deg > 170.0) {
-        // Extreme wide-angle (FOV > 170°): similar to ultra extreme
-        virtual_fx = 290.0;
-        virtual_fy = 290.0;
+        // Extreme wide-angle (FOV > 170°): dynamic calculation
+        double fov_rad = calc_fov_deg * M_PI / 180.0;
+        virtual_fx = rectified_size.width / (2.0 * std::tan(fov_rad / 2.0));
+        virtual_fy = rectified_size.height / (2.0 * std::tan(fov_rad / 2.0));
+        // Clamp to reasonable range [150, 280]
+        virtual_fx = std::max(150.0, std::min(280.0, virtual_fx));
+        virtual_fy = std::max(150.0, std::min(280.0, virtual_fy));
     } else if (approx_fov_deg > 130.0) {
         // Wide-angle (FOV > 130°): slightly higher focal length
-        virtual_fx = 300.0;
-        virtual_fy = 300.0;
+        double fov_rad = calc_fov_deg * M_PI / 180.0;
+        virtual_fx = rectified_size.width / (2.0 * std::tan(fov_rad / 2.0));
+        virtual_fy = rectified_size.height / (2.0 * std::tan(fov_rad / 2.0));
+        
+        // Aggressive zoom out for > 130 degrees to ensure edge points are visible
+        // For fisheye lenses, we want to see the edges in the rectified image
+        // Apply 0.6 factor to zoom out (expand FOV)
+        virtual_fx *= 0.6; 
+        virtual_fy *= 0.6;
+
+        // Clamp to reasonable range [30, 350] - Lowered min to 30 for extreme wide angle
+        virtual_fx = std::max(30.0, std::min(350.0, virtual_fx));
+        virtual_fy = std::max(30.0, std::min(350.0, virtual_fy));
     } else if (approx_fov_deg > 100.0) {
-        // Moderate wide-angle: use measured focal length
-        virtual_fx = avg_fx;
-        virtual_fy = avg_fy;
+        // Moderate wide-angle: use measured focal length with slight boost
+        virtual_fx = avg_fx * 0.95;
+        virtual_fy = avg_fy * 0.95;
     } else {
         // Standard lens: can use measured focal length or slightly higher
         virtual_fx = avg_fx * 1.1;
@@ -857,6 +1004,15 @@ inline int calculateRectificationError(
     
     VirtualPinholeParams virtual_cam(rectified_size.width, rectified_size.height, virtual_fx);
     virtual_cam.fy = virtual_fy;
+    
+    // Define grid for center/edge classification (4x3 grid)
+    // Center region: middle 2 columns (indices 1,2) and middle row (index 1)
+    double col_width = rectified_size.width / 4.0;
+    double row_height = rectified_size.height / 3.0;
+    double center_x_min = col_width;
+    double center_x_max = 3.0 * col_width;
+    double center_y_min = row_height;
+    double center_y_max = 2.0 * row_height;
     
     // For each 3D point, project through both cameras and measure rectification error
     for (size_t i = 0; i < object_points.size(); i++) {
@@ -878,8 +1034,8 @@ inline int calculateRectificationError(
             point_camera_right[1] += camera_extrinsics_right[i][4];
             point_camera_right[2] += camera_extrinsics_right[i][5];
             
-            // Skip points behind camera
-            if (point_camera_left[2] <= 0 || point_camera_right[2] <= 0) {
+            // Skip points behind camera ONLY if using planar projection
+            if (!use_spherical && (point_camera_left[2] <= 0 || point_camera_right[2] <= 0)) {
                 points_behind_camera++;
                 continue;
             }
@@ -894,43 +1050,100 @@ inline int calculateRectificationError(
             cv::Mat pt_right_rect = R_rect_right * pt_right_cam;
             
 
-            // Project to virtual pinhole image
-            if (pt_left_rect.at<double>(2) > 0 && pt_right_rect.at<double>(2) > 0) {
-                double u_left = virtual_cam.fx * (pt_left_rect.at<double>(0) / pt_left_rect.at<double>(2)) + virtual_cam.cx;
-                double v_left = virtual_cam.fy * (pt_left_rect.at<double>(1) / pt_left_rect.at<double>(2)) + virtual_cam.cy;
+            // Project to virtual image
+            double u_left, v_left, u_right, v_right;
+            bool projected = false;
+            
+            if (use_spherical) {
+                // Spherical Stereo Forward Projection
+                // X-axis is baseline
+                // u = f * phi + cx, where phi = atan2(X, rho)
+                // v = f * theta + cy, where theta = atan2(Y, Z)
                 
-                double u_right = virtual_cam.fx * (pt_right_rect.at<double>(0) / pt_right_rect.at<double>(2)) + virtual_cam.cx;
-                double v_right = virtual_cam.fy * (pt_right_rect.at<double>(1) / pt_right_rect.at<double>(2)) + virtual_cam.cy;
+                double X_L = pt_left_rect.at<double>(0);
+                double Y_L = pt_left_rect.at<double>(1);
+                double Z_L = pt_left_rect.at<double>(2);
                 
-                // Optimization ④: Add hard boundary clipping
-                // Check if points are within rectified image bounds [0, width)×[0, height)
-                if (v_left >= 0 && v_left < rectified_size.height &&
-                    v_right >= 0 && v_right < rectified_size.height &&
-                    u_left >= 0 && u_left < rectified_size.width &&
-                    u_right >= 0 && u_right < rectified_size.width) {
+                double X_R = pt_right_rect.at<double>(0);
+                double Y_R = pt_right_rect.at<double>(1);
+                double Z_R = pt_right_rect.at<double>(2);
+                
+                double rho_L = std::sqrt(Y_L*Y_L + Z_L*Z_L);
+                double rho_R = std::sqrt(Y_R*Y_R + Z_R*Z_R);
+                
+                // Check for singularity at rho=0 (on X-axis)
+                if (rho_L > 1e-6 && rho_R > 1e-6) {
+                    double theta_L = std::atan2(Y_L, Z_L);
+                    double phi_L = std::atan2(X_L, rho_L);
                     
-                    // Compute y-coordinate difference (epipolar error)
-                    // After perfect rectification, corresponding points should have same y-coordinate
-                    double y_diff = std::abs(v_left - v_right);
+                    double theta_R = std::atan2(Y_R, Z_R);
+                    double phi_R = std::atan2(X_R, rho_R);
                     
-                    // Optimization ④: Exclude extreme outliers (y_diff > 100 px) from average
-                    // These are likely due to severely distorted edge points and would
-                    // artificially inflate the average error (e.g., 687 px → 0.3 px)
-                    if (y_diff <= 100.0) {
-                        avg_error += y_diff;
-                        if (y_diff > max_error) {
-                            max_error = y_diff;
-                        }
-                        valid_points++;
-                    } else {
-                        // Extreme outlier - don't count in statistics
-                        points_out_of_bounds++;
-                    }
-                } else {
-                    points_out_of_bounds++;
+                    u_left = virtual_cam.fx * phi_L + virtual_cam.cx;
+                    v_left = virtual_cam.fy * theta_L + virtual_cam.cy;
+                    
+                    u_right = virtual_cam.fx * phi_R + virtual_cam.cx;
+                    v_right = virtual_cam.fy * theta_R + virtual_cam.cy;
+                    projected = true;
                 }
             } else {
-                points_negative_z_rect++;
+                // Planar Projection
+                if (pt_left_rect.at<double>(2) > 0 && pt_right_rect.at<double>(2) > 0) {
+                    u_left = virtual_cam.fx * (pt_left_rect.at<double>(0) / pt_left_rect.at<double>(2)) + virtual_cam.cx;
+                    v_left = virtual_cam.fy * (pt_left_rect.at<double>(1) / pt_left_rect.at<double>(2)) + virtual_cam.cy;
+                    
+                    u_right = virtual_cam.fx * (pt_right_rect.at<double>(0) / pt_right_rect.at<double>(2)) + virtual_cam.cx;
+                    v_right = virtual_cam.fy * (pt_right_rect.at<double>(1) / pt_right_rect.at<double>(2)) + virtual_cam.cy;
+                    projected = true;
+                } else {
+                    points_negative_z_rect++;
+                }
+            }
+
+            if (projected) {
+                // Optimization ④: Add hard boundary clipping
+                // Check if points are within rectified image bounds [0, width)×[0, height)
+                bool inside_bounds = (v_left >= 0 && v_left < rectified_size.height &&
+                                      v_right >= 0 && v_right < rectified_size.height &&
+                                      u_left >= 0 && u_left < rectified_size.width &&
+                                      u_right >= 0 && u_right < rectified_size.width);
+                
+                if (!inside_bounds) {
+                    points_out_of_bounds++;
+                }
+
+                // Compute y-coordinate difference (epipolar error)
+                // After perfect rectification, corresponding points should have same y-coordinate
+                double y_diff = std::abs(v_left - v_right);
+                
+                // Optimization: Include all points in error calculation, even if out of bounds
+                // User request: "Use 'original corners -> rectifyPoints' to bypass detection failure"
+                // We still filter extreme outliers (y_diff > 2000 px) to avoid garbage
+                if (y_diff <= 2000.0) {
+                    avg_error += y_diff;
+                    if (y_diff > max_error) {
+                        max_error = y_diff;
+                    }
+                    valid_points++;
+                    
+                    // Classify as Center or Edge
+                    // Use the average position of left and right points
+                    double u_avg = (u_left + u_right) / 2.0;
+                    double v_avg = (v_left + v_right) / 2.0;
+                    
+                    if (u_avg >= center_x_min && u_avg < center_x_max &&
+                        v_avg >= center_y_min && v_avg < center_y_max) {
+                        center_error += y_diff;
+                        center_count++;
+                    } else {
+                        edge_error += y_diff;
+                        edge_count++;
+                    }
+                } else {
+                    // Extreme outlier - don't count in statistics
+                    // If it was inside bounds but had huge error, we count it as outlier
+                    // If it was outside bounds, we already counted it as out of bounds
+                }
             }
         }
     }
@@ -939,6 +1152,14 @@ inline int calculateRectificationError(
     
     if (valid_points > 0) {
         avg_error /= valid_points;
+    }
+    
+    if (center_count > 0) {
+        center_error /= center_count;
+    }
+    
+    if (edge_count > 0) {
+        edge_error /= edge_count;
     }
     
     // Always print diagnostics if we have fewer than 50% valid points

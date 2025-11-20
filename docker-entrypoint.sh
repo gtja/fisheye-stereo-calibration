@@ -250,10 +250,22 @@ run_quality_checks() {
 if [ $# -gt 0 ]; then
     echo "Running calibration with custom arguments: $@"
     
+    # Check for --skip-image-checks flag in arguments
+    SKIP_IMAGE_CHECKS=false
+    args=("$@")
+    filtered_args=()
+    for arg in "$@"; do
+        if [ "$arg" = "--skip-image-checks" ]; then
+            SKIP_IMAGE_CHECKS=true
+        else
+            filtered_args+=("$arg")
+        fi
+    done
+    args=("${filtered_args[@]}")
+    
     # Check if quality checks should be run
-    if [ "$RUN_QUALITY_CHECKS" = "true" ]; then
+    if [ "$RUN_QUALITY_CHECKS" = "true" ] && [ "$SKIP_IMAGE_CHECKS" = "false" ]; then
         # Parse arguments to extract necessary parameters for quality checks and workflow
-        args=("$@")
         for i in "${!args[@]}"; do
             case "${args[$i]}" in
                 -w) BOARD_WIDTH="${args[$((i+1))]}" ;;
@@ -269,14 +281,15 @@ if [ $# -gt 0 ]; then
         
         # Handle -o parameter: if it's a directory, construct full file path
         if [ -n "$OUTPUT_PARAM" ]; then
-            if [ -d "$OUTPUT_PARAM" ] || [[ "$OUTPUT_PARAM" != *.yml && "$OUTPUT_PARAM" != *.yaml ]]; then
-                # It's a directory or not a YAML file - treat as output directory
-                OUTPUT_DIR="$OUTPUT_PARAM"
-                OUTPUT_FILE="${OUTPUT_DIR}/cam_stereo.yml"
-            else
+            # Check if it looks like a file path (ends with .yml or .yaml)
+            if [[ "$OUTPUT_PARAM" == *.yml || "$OUTPUT_PARAM" == *.yaml ]]; then
                 # It's a file path
                 OUTPUT_FILE="$OUTPUT_PARAM"
                 OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
+            else
+                # It's a directory or directory-like path - treat as output directory
+                OUTPUT_DIR="$OUTPUT_PARAM"
+                OUTPUT_FILE="${OUTPUT_DIR}/cam_stereo.yml"
             fi
         fi
         
@@ -321,10 +334,13 @@ if [ $# -gt 0 ]; then
         # Update -o parameter in args to use full file path (not just directory)
         for i in "${!args[@]}"; do
             if [ "${args[$i]}" = "-o" ]; then
-                # Check if the next value is a directory or a file path
                 next_idx=$((i+1))
-                if [ -d "${args[$next_idx]}" ] || [[ "${args[$next_idx]}" != *.yml && "${args[$next_idx]}" != *.yaml ]]; then
-                    # It's a directory - convert to full file path
+                # Check if it looks like a file path (ends with .yml or .yaml)
+                if [[ "${args[$next_idx]}" == *.yml || "${args[$next_idx]}" == *.yaml ]]; then
+                    # It's a file path - keep as is
+                    :
+                else
+                    # It's a directory or directory-like path - add default file name
                     args[$next_idx]="${args[$next_idx]}/cam_stereo.yml"
                 fi
                 break
@@ -370,10 +386,11 @@ if [ $# -gt 0 ]; then
         
         # Handle -o parameter: if it's a directory, construct full file path
         if [ -n "$OUTPUT_PARAM" ]; then
-            if [ -d "$OUTPUT_PARAM" ] || [[ "$OUTPUT_PARAM" != *.yml && "$OUTPUT_PARAM" != *.yaml ]]; then
-                # It's a directory or not a YAML file - treat as output directory
-                OUTPUT_DIR="$OUTPUT_PARAM"
-                OUTPUT_FILE="${OUTPUT_DIR}/cam_stereo.yml"
+            # Check if it looks like a file path (ends with .yml or .yaml)
+            if [[ "$OUTPUT_PARAM" == *.yml || "$OUTPUT_PARAM" == *.yaml ]]; then
+                # It's a file path
+                OUTPUT_FILE="$OUTPUT_PARAM"
+                OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
                 # Update the -o parameter in args array
                 for i in "${!args[@]}"; do
                     if [ "${args[$i]}" = "-o" ]; then
@@ -382,9 +399,16 @@ if [ $# -gt 0 ]; then
                     fi
                 done
             else
-                # It's a file path
-                OUTPUT_FILE="$OUTPUT_PARAM"
-                OUTPUT_DIR="$(dirname "$OUTPUT_FILE")"
+                # It's a directory or directory-like path - treat as output directory
+                OUTPUT_DIR="$OUTPUT_PARAM"
+                OUTPUT_FILE="${OUTPUT_DIR}/cam_stereo.yml"
+                # Update the -o parameter in args array to use full file path
+                for i in "${!args[@]}"; do
+                    if [ "${args[$i]}" = "-o" ]; then
+                        args[$((i+1))]="$OUTPUT_FILE"
+                        break
+                    fi
+                done
             fi
         fi
         

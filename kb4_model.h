@@ -42,17 +42,9 @@ inline bool project(const KB4Params& params,
     double y = point3d[1];
     double z = point3d[2];
     
-    // Check for points behind camera
-    if (z <= 0.0) {
-        return false;
-    }
-    
-    // Normalize
-    double a = x / z;
-    double b = y / z;
-    
-    double r = sqrt(a*a + b*b);
-    double theta = atan(r);
+    // Use atan2 to handle full sphere (including z <= 0)
+    double r_3d = sqrt(x*x + y*y);
+    double theta = atan2(r_3d, z);
     
     // Apply distortion
     double theta2 = theta * theta;
@@ -62,10 +54,16 @@ inline bool project(const KB4Params& params,
     
     double theta_d = theta * (1.0 + k1*theta2 + k2*theta4 + k3*theta6 + k4*theta8);
     
-    double scale = (r > 1e-8) ? (theta_d / r) : 1.0;
+    // Calculate scaling factor
+    // We want to map (x,y) direction to radius theta_d
+    // x_img = theta_d * cos(phi) = theta_d * (x / r_3d)
+    // y_img = theta_d * sin(phi) = theta_d * (y / r_3d)
+    // scale = theta_d / r_3d
     
-    double mx = a * scale;
-    double my = b * scale;
+    double scale = (r_3d > 1e-8) ? (theta_d / r_3d) : 1.0;
+    
+    double mx = x * scale;
+    double my = y * scale;
     
     // Apply focal length and principal point
     point2d[0] = fx * mx + cx;
@@ -140,7 +138,8 @@ inline void createRectificationMap(const KB4Params& params,
                                    const cv::Size& image_size,
                                    const cv::Size& rectified_size,
                                    cv::Mat& map_x,
-                                   cv::Mat& map_y) {
+                                   cv::Mat& map_y,
+                                   const cv::Mat& R = cv::Mat::eye(3, 3, CV_64F)) {
     map_x.create(rectified_size, CV_32FC1);
     map_y.create(rectified_size, CV_32FC1);
     
@@ -159,7 +158,13 @@ inline void createRectificationMap(const KB4Params& params,
             
             // Normalize to unit vector
             double norm = sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
-            double point3d[3] = {x_rect/norm, y_rect/norm, z_rect/norm};
+            double p_virt[3] = {x_rect/norm, y_rect/norm, z_rect/norm};
+            
+            // Apply rotation: P_cam = R * P_virt
+            double point3d[3];
+            point3d[0] = R.at<double>(0,0)*p_virt[0] + R.at<double>(0,1)*p_virt[1] + R.at<double>(0,2)*p_virt[2];
+            point3d[1] = R.at<double>(1,0)*p_virt[0] + R.at<double>(1,1)*p_virt[1] + R.at<double>(1,2)*p_virt[2];
+            point3d[2] = R.at<double>(2,0)*p_virt[0] + R.at<double>(2,1)*p_virt[1] + R.at<double>(2,2)*p_virt[2];
             
             // Project to original fisheye image
             double point2d[2];

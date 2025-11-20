@@ -59,12 +59,16 @@ int main() {
     Size rectified_size(800, 600);
     
     double avg_err = 0.0, max_err = 0.0;
+    double center_err = 0.0, edge_err = 0.0;
+    int center_count = 0, edge_count = 0;
     int num_points = double_sphere::calculateRectificationError(
         object_points, left_img_points, right_img_points,
         left_params, right_params,
         R, T, image_size, rectified_size,
         camera_extrinsics_left, camera_extrinsics_right,
-        avg_err, max_err
+        avg_err, max_err,
+        center_err, edge_err,
+        center_count, edge_count
     );
     
     cout << "Result: " << num_points << " points evaluated" << endl;
@@ -81,7 +85,9 @@ int main() {
         left_params, right_params,
         R, T, image_size, rectified_size,
         camera_extrinsics_left, camera_extrinsics_right,
-        avg_err, max_err
+        avg_err, max_err,
+        center_err, edge_err,
+        center_count, edge_count
     );
     
     cout << "Result: " << num_points << " points evaluated" << endl;
@@ -102,7 +108,9 @@ int main() {
         left_params, right_params,
         R, T, image_size, rectified_size,
         camera_extrinsics_left, camera_extrinsics_right,
-        avg_err, max_err
+        avg_err, max_err,
+        center_err, edge_err,
+        center_count, edge_count
     );
     
     cout << "Result: " << num_points << " points evaluated" << endl;

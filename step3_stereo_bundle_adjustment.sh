@@ -60,7 +60,9 @@ if [ ! -f "$HANDEYE_FILE" ]; then
 fi
 
 echo "Running stereo bundle adjustment..."
-echo "Command: ./calibrate_ds -w $BOARD_WIDTH -h $BOARD_HEIGHT -s $SQUARE_SIZE -d $IMG_DIR -l $LEFT_PREFIX -r $RIGHT_PREFIX -e $IMAGE_EXTENSION --init-extrinsic $HANDEYE_FILE --joint-ba -o $OUTPUT_FILE"
+echo "Command: ./calibrate_ds -w $BOARD_WIDTH -h $BOARD_HEIGHT -s $SQUARE_SIZE -d $IMG_DIR -l $LEFT_PREFIX -r $RIGHT_PREFIX -e $IMAGE_EXTENSION --init-extrinsic $HANDEYE_FILE --joint-ba -o $OUTPUT_FILE --skip-image-checks"
+echo ""
+echo "Note: Using --skip-image-checks to skip redundant image quality checks (already performed in Step 1)"
 echo ""
 
 if ! ./calibrate_ds \
@@ -73,7 +75,8 @@ if ! ./calibrate_ds \
     -e "$IMAGE_EXTENSION" \
     --init-extrinsic "$HANDEYE_FILE" \
     --joint-ba \
-    -o "$OUTPUT_FILE"; then
+    -o "$OUTPUT_FILE" \
+    --skip-image-checks; then
     echo "Error: Stereo bundle adjustment failed"
     exit 1
 fi

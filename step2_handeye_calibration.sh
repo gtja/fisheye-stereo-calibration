@@ -86,7 +86,9 @@ if [ ! -f "$RIGHT_MONO" ]; then
 fi
 
 echo "Running hand-eye calibration..."
-echo "Command: ./compute_handeye -w $BOARD_WIDTH -h $BOARD_HEIGHT -s $SQUARE_SIZE -d $IMG_DIR -l $LEFT_PREFIX -r $RIGHT_PREFIX -e $IMAGE_EXTENSION -L $LEFT_MONO -R $RIGHT_MONO -o $HANDEYE_FILE"
+echo "Command: ./compute_handeye -w $BOARD_WIDTH -h $BOARD_HEIGHT -s $SQUARE_SIZE -d $IMG_DIR -l $LEFT_PREFIX -r $RIGHT_PREFIX -e $IMAGE_EXTENSION -L $LEFT_MONO -R $RIGHT_MONO -o $HANDEYE_FILE --skip-image-checks"
+echo ""
+echo "Note: Using --skip-image-checks to skip redundant image quality checks (already performed in Step 1)"
 echo ""
 
 if ! ./compute_handeye \
@@ -99,7 +101,8 @@ if ! ./compute_handeye \
     -e "$IMAGE_EXTENSION" \
     -L "$LEFT_MONO" \
     -R "$RIGHT_MONO" \
-    -o "$HANDEYE_FILE"; then
+    -o "$HANDEYE_FILE" \
+    --skip-image-checks; then
     echo "Error: Hand-eye calibration failed"
     exit 1
 fi

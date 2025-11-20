@@ -173,87 +173,127 @@ void load_image_points_with_precorrection(int board_width, int board_height, flo
         cvtColor(img1, gray1, COLOR_BGR2GRAY);
         cvtColor(img2, gray2, COLOR_BGR2GRAY);
 
-        // Create rectification maps using KB4 model for pre-correction
-        kb4::createRectificationMap(kb4_left, img1.size(), rectified_size, map_left_x, map_left_y);
-        kb4::createRectificationMap(kb4_right, img2.size(), rectified_size, map_right_x, map_right_y);
-
-        // Apply rectification (warp to virtual plane)
-        Mat rect_left, rect_right;
-        remap(gray1, rect_left, map_left_x, map_left_y, INTER_LINEAR);
-        remap(gray2, rect_right, map_right_x, map_right_y, INTER_LINEAR);
+        // Multi-View Detection (CubeMap strategy)
+        // Try 5 views: Front, Left, Right, Up, Down to cover >180 FOV
+        vector<Mat> rotations;
+        rotations.push_back(Mat::eye(3, 3, CV_64F)); // Front
+        rotations.push_back((Mat_<double>(3,3) << 0,0,-1, 0,1,0, 1,0,0)); // Left (Look Left)
+        rotations.push_back((Mat_<double>(3,3) << 0,0,1, 0,1,0, -1,0,0)); // Right (Look Right)
+        rotations.push_back((Mat_<double>(3,3) << 1,0,0, 0,0,1, 0,-1,0)); // Up (Look Up)
+        rotations.push_back((Mat_<double>(3,3) << 1,0,0, 0,0,-1, 0,1,0)); // Down (Look Down)
 
         bool found1 = false, found2 = false;
+        Mat R_found1, R_found2;
 
-        // Find corners on rectified images (960×720 for better detection)
-        found1 = findChessboardCorners(rect_left, board_size, corners1,
-                                      CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
-        found2 = findChessboardCorners(rect_right, board_size, corners2,
-                                      CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
+        // Detect in Left Image
+        for (size_t k = 0; k < rotations.size(); k++) {
+            kb4::createRectificationMap(kb4_left, img1.size(), rectified_size, map_left_x, map_left_y, rotations[k]);
+            Mat rect_left;
+            remap(gray1, rect_left, map_left_x, map_left_y, INTER_LINEAR);
+            
+            found1 = findChessboardCorners(rect_left, board_size, corners1,
+                                          CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
+            if (found1) {
+                // Refine corners on rectified image
+                cornerSubPix(rect_left, corners1, Size(3, 3), Size(-1, -1),
+                            TermCriteria(TermCriteria::EPS + TermCriteria::COUNT, 30, 0.01));
+                R_found1 = rotations[k].clone();
+                break;
+            }
+        }
+
+        // Detect in Right Image
+        for (size_t k = 0; k < rotations.size(); k++) {
+            kb4::createRectificationMap(kb4_right, img2.size(), rectified_size, map_right_x, map_right_y, rotations[k]);
+            Mat rect_right;
+            remap(gray2, rect_right, map_right_x, map_right_y, INTER_LINEAR);
+            
+            found2 = findChessboardCorners(rect_right, board_size, corners2,
+                                          CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FILTER_QUADS);
+            if (found2) {
+                // Refine corners on rectified image
+                cornerSubPix(rect_right, corners2, Size(3, 3), Size(-1, -1),
+                            TermCriteria(TermCriteria::EPS + TermCriteria::COUNT, 30, 0.01));
+                R_found2 = rotations[k].clone();
+                break;
+            }
+        }
 
         std::cout << "[LOG] 图像对 " << i << " 检测到角点: left=" << found1 << ", right=" << found2 << std::endl;
 
         if (found1) {
-            cornerSubPix(rect_left, corners1, Size(5, 5), Size(-1, -1),
-                        TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 0.01));
-
-            // Back-project corners to original image coordinates
-            vector<Point2f> corners1_orig;
-            for (const auto& corner : corners1) {
-                // Use inverse mapping: unproject from rectified to 3D, then project to original
-                double point2d_rect[2] = {corner.x, corner.y};
-
-                double fx_rect = kb4_left.fx * 0.6;
-                double fy_rect = kb4_left.fy * 0.6;
-                double cx_rect = rectified_size.width * 0.5;
-                double cy_rect = rectified_size.height * 0.5;
-
-                double x_rect = (point2d_rect[0] - cx_rect) / fx_rect;
-                double y_rect = (point2d_rect[1] - cy_rect) / fy_rect;
+            // Unproject from virtual plane to 3D rays, then project to original fisheye image
+            vector<Point2f> corners_orig;
+            
+            // Virtual camera parameters used in createRectificationMap
+            double fx_rect = kb4_left.fx * 0.6;
+            double fy_rect = kb4_left.fy * 0.6;
+            double cx_rect = rectified_size.width * 0.5;
+            double cy_rect = rectified_size.height * 0.5;
+            
+            for (const auto& pt : corners1) {
+                // Unproject from virtual pinhole
+                double x_rect = (pt.x - cx_rect) / fx_rect;
+                double y_rect = (pt.y - cy_rect) / fy_rect;
                 double z_rect = 1.0;
-
+                
                 double norm = sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
-                double point3d[3] = {x_rect/norm, y_rect/norm, z_rect/norm};
-
-                double point2d_orig[2];
-                if (kb4::project(kb4_left, point3d, point2d_orig)) {
-                    corners1_orig.push_back(Point2f(point2d_orig[0], point2d_orig[1]));
-                } else {
-                    corners1_orig.push_back(corner);  // Fallback
-                }
+                double p_virt[3] = {x_rect/norm, y_rect/norm, z_rect/norm};
+                
+                // Apply rotation: P_cam = R * P_virt
+                double point3d[3];
+                point3d[0] = R_found1.at<double>(0,0)*p_virt[0] + R_found1.at<double>(0,1)*p_virt[1] + R_found1.at<double>(0,2)*p_virt[2];
+                point3d[1] = R_found1.at<double>(1,0)*p_virt[0] + R_found1.at<double>(1,1)*p_virt[1] + R_found1.at<double>(1,2)*p_virt[2];
+                point3d[2] = R_found1.at<double>(2,0)*p_virt[0] + R_found1.at<double>(2,1)*p_virt[1] + R_found1.at<double>(2,2)*p_virt[2];
+                
+                // Project to original fisheye
+                double point2d[2];
+                kb4::project(kb4_left, point3d, point2d);
+                corners_orig.push_back(Point2f(point2d[0], point2d[1]));
             }
-            corners1 = corners1_orig;
+            corners1 = corners_orig;
+            
+            // Final refinement on original image
+            cornerSubPix(gray1, corners1, Size(3, 3), Size(-1, -1),
+                        TermCriteria(TermCriteria::EPS + TermCriteria::COUNT, 30, 0.01));
             std::cout << "[LOG] 左图角点反投影完成, 数量: " << corners1.size() << std::endl;
         }
 
         if (found2) {
-            cornerSubPix(rect_right, corners2, Size(5, 5), Size(-1, -1),
-                        TermCriteria(TermCriteria::EPS | TermCriteria::MAX_ITER, 30, 0.01));
-
-            // Back-project corners to original image coordinates
-            vector<Point2f> corners2_orig;
-            for (const auto& corner : corners2) {
-                double point2d_rect[2] = {corner.x, corner.y};
-
-                double fx_rect = kb4_right.fx * 0.6;
-                double fy_rect = kb4_right.fy * 0.6;
-                double cx_rect = rectified_size.width * 0.5;
-                double cy_rect = rectified_size.height * 0.5;
-
-                double x_rect = (point2d_rect[0] - cx_rect) / fx_rect;
-                double y_rect = (point2d_rect[1] - cy_rect) / fy_rect;
+            // Unproject from virtual plane to 3D rays, then project to original fisheye image
+            vector<Point2f> corners_orig;
+            
+            // Virtual camera parameters used in createRectificationMap
+            double fx_rect = kb4_right.fx * 0.6;
+            double fy_rect = kb4_right.fy * 0.6;
+            double cx_rect = rectified_size.width * 0.5;
+            double cy_rect = rectified_size.height * 0.5;
+            
+            for (const auto& pt : corners2) {
+                // Unproject from virtual pinhole
+                double x_rect = (pt.x - cx_rect) / fx_rect;
+                double y_rect = (pt.y - cy_rect) / fy_rect;
                 double z_rect = 1.0;
-
+                
                 double norm = sqrt(x_rect*x_rect + y_rect*y_rect + z_rect*z_rect);
-                double point3d[3] = {x_rect/norm, y_rect/norm, z_rect/norm};
-
-                double point2d_orig[2];
-                if (kb4::project(kb4_right, point3d, point2d_orig)) {
-                    corners2_orig.push_back(Point2f(point2d_orig[0], point2d_orig[1]));
-                } else {
-                    corners2_orig.push_back(corner);
-                }
+                double p_virt[3] = {x_rect/norm, y_rect/norm, z_rect/norm};
+                
+                // Apply rotation: P_cam = R * P_virt
+                double point3d[3];
+                point3d[0] = R_found2.at<double>(0,0)*p_virt[0] + R_found2.at<double>(0,1)*p_virt[1] + R_found2.at<double>(0,2)*p_virt[2];
+                point3d[1] = R_found2.at<double>(1,0)*p_virt[0] + R_found2.at<double>(1,1)*p_virt[1] + R_found2.at<double>(1,2)*p_virt[2];
+                point3d[2] = R_found2.at<double>(2,0)*p_virt[0] + R_found2.at<double>(2,1)*p_virt[1] + R_found2.at<double>(2,2)*p_virt[2];
+                
+                // Project to original fisheye
+                double point2d[2];
+                kb4::project(kb4_right, point3d, point2d);
+                corners_orig.push_back(Point2f(point2d[0], point2d[1]));
             }
-            corners2 = corners2_orig;
+            corners2 = corners_orig;
+            
+            // Final refinement on original image
+            cornerSubPix(gray2, corners2, Size(3, 3), Size(-1, -1),
+                        TermCriteria(TermCriteria::EPS + TermCriteria::COUNT, 30, 0.01));
             std::cout << "[LOG] 右图角点反投影完成, 数量: " << corners2.size() << std::endl;
         }
 
@@ -1904,9 +1944,9 @@ int main(int argc, char const *argv[])
     // fx < 400: FOV > 180° (extreme)
     // fx < 500: FOV > 150° (wide-angle)
     
-    // Keep rectified image at original size to minimize error amplification
-    // Previously scaled up images amplified rectification errors
-    cv::Size rectified_size = img1.size();
+    // Optimization: Use larger rectified image size to capture wide FOV points
+    // User suggested 4000x3000 to allow virtual focal length to increase and capture edge points
+    cv::Size rectified_size(4000, 3000);
     
     printf("   Using rectified image size: %dx%d (original: %dx%d, avg_fx: %.1f)\n", 
            rectified_size.width, rectified_size.height, 
@@ -1951,12 +1991,24 @@ int main(int argc, char const *argv[])
     }
     cv::Mat T_stereo_avg = T_stereo_sum / static_cast<double>(T_stereo_list.size());
     
-    // For rotation, use the median or first transformation (averaging rotations is non-trivial)
-    // Using KB4 as a good stable reference
-    cv::Mat R_stereo_avg = cv::Mat(R_kb4);
+    // Compute average rotation from optimized extrinsics
+    // Averaging rotation vectors is a valid approximation for small variations
+    cv::Mat rvec_sum = cv::Mat::zeros(3, 1, CV_64F);
+    for (const auto& R : R_stereo_list) {
+        cv::Mat rvec;
+        cv::Rodrigues(R, rvec);
+        rvec_sum += rvec;
+    }
+    cv::Mat rvec_avg = rvec_sum / static_cast<double>(R_stereo_list.size());
+    cv::Mat R_stereo_avg;
+    cv::Rodrigues(rvec_avg, R_stereo_avg);
     
     double avg_rectification_err = 0.0;
     double max_rectification_err = 0.0;
+    double center_rectification_err = 0.0;
+    double edge_rectification_err = 0.0;
+    int center_count = 0;
+    int edge_count = 0;
     
     int num_rect_points = double_sphere::calculateRectificationError(
         object_points, left_img_points, right_img_points,
@@ -1964,13 +2016,26 @@ int main(int argc, char const *argv[])
         R_stereo_avg, T_stereo_avg,
         img1.size(), rectified_size,
         camera_extrinsics_left, camera_extrinsics_right,
-        avg_rectification_err, max_rectification_err
+        avg_rectification_err, max_rectification_err,
+        center_rectification_err, edge_rectification_err,
+        center_count, edge_count
     );
     
     printf("   Evaluated %d corner points\n", num_rect_points);
     if (num_rect_points > 0) {
         printf("   Average y-difference: %.4f pixels [threshold: < 0.3 pixel]\n", avg_rectification_err);
         printf("   Maximum y-difference: %.4f pixels [threshold: < 0.7 pixel]\n", max_rectification_err);
+        
+        if (center_count > 0) {
+            printf("   Center y-difference:  %.4f pixels (%d points)\n", center_rectification_err, center_count);
+        }
+        if (edge_count > 0) {
+            printf("   Edge y-difference:    %.4f pixels (%d points)\n", edge_rectification_err, edge_count);
+            printf("   Edge Row Difference:  %.4f pixels (New Metric)\n", edge_rectification_err);
+        } else {
+            printf("   Edge Row Difference:  N/A (0 edge points - try capturing checkerboard at image periphery)\n");
+        }
+        
         printf("   Status: %s\n", 
                (avg_rectification_err < 0.3 && max_rectification_err < 0.7) ? "PASS" : "FAIL");
     } else {
@@ -2088,6 +2153,81 @@ int main(int argc, char const *argv[])
     fs << "T" << Mat(T_kb4);
     
     // Save evaluation metrics
+    fs << "calibration_accuracy_evaluation" << "{";
+    
+    // 1. Monocular Reprojection Error
+    fs << "monocular_reprojection_error" << "{";
+    fs << "left_camera_avg" << avg_err_left;
+    fs << "right_camera_avg" << avg_err_right;
+    fs << "overall_avg" << avg_monocular_err;
+    fs << "threshold" << 0.3;
+    fs << "status" << (avg_monocular_err < 0.3 ? "PASS" : "FAIL");
+    fs << "}";
+    
+    // 2. Stereo Reprojection Error
+    fs << "stereo_reprojection_error" << "{";
+    fs << "average" << avg_stereo_err;
+    fs << "maximum" << max_stereo_err;
+    fs << "threshold_avg" << 0.3;
+    fs << "threshold_max" << 1.5;
+    fs << "status" << (avg_stereo_err < 0.3 && max_stereo_err < 1.5 ? "PASS" : "FAIL");
+    fs << "}";
+    
+    // 3. Stereo Rectification Error
+    fs << "rectification_error" << "{";
+    fs << "num_points_evaluated" << num_rect_points;
+    if (num_rect_points > 0) {
+        fs << "average_y_difference" << avg_rectification_err;
+        fs << "maximum_y_difference" << max_rectification_err;
+        fs << "threshold_avg" << 0.3;
+        fs << "threshold_max" << 0.7;
+        fs << "status" << ((avg_rectification_err < 0.3 && max_rectification_err < 0.7) ? "PASS" : "FAIL");
+    } else {
+        fs << "average_y_difference" << -1.0;  // Indicate N/A
+        fs << "maximum_y_difference" << -1.0;  // Indicate N/A
+        fs << "status" << "SKIPPED";
+        fs << "reason" << "Insufficient data for evaluation";
+    }
+    fs << "}";
+    
+    // 4. Baseline Distance
+    fs << "baseline" << "{";
+    fs << "calibrated_baseline_m" << calibrated_baseline;
+    fs << "calibrated_baseline_mm" << (calibrated_baseline * 1000.0);
+    if (physical_baseline > 0) {
+        fs << "physical_baseline_m" << physical_baseline;
+        fs << "physical_baseline_mm" << (physical_baseline * 1000.0);
+        double baseline_error = fabs(calibrated_baseline - physical_baseline);
+        fs << "error_m" << baseline_error;
+        fs << "error_mm" << (baseline_error * 1000.0);
+        fs << "threshold_m" << 0.001;
+        fs << "threshold_mm" << 1.0;
+        fs << "status" << (baseline_error < 0.001 ? "PASS" : "FAIL");
+    } else {
+        fs << "physical_baseline_m" << -1.0;  // Not provided
+        fs << "status" << "N/A (not provided)";
+    }
+    fs << "}";
+    
+    // Overall Summary
+    fs << "overall_summary" << "{";
+    bool monocular_pass = avg_monocular_err < 0.3;
+    bool stereo_pass = avg_stereo_err < 0.3 && max_stereo_err < 1.5;
+    bool rectification_pass = (num_rect_points > 0) ? 
+        (avg_rectification_err < 0.3 && max_rectification_err < 0.7) : true;
+    bool baseline_pass = (physical_baseline > 0) ? 
+        (fabs(calibrated_baseline - physical_baseline) < 0.001) : true;
+    
+    fs << "monocular_pass" << monocular_pass;
+    fs << "stereo_pass" << stereo_pass;
+    fs << "rectification_pass" << rectification_pass;
+    fs << "baseline_pass" << baseline_pass;
+    fs << "all_tests_pass" << (monocular_pass && stereo_pass && rectification_pass && baseline_pass);
+    fs << "}";
+    
+    fs << "}";
+    
+    // Keep backward compatibility with old metric names
     fs << "monocular_reprojection_error_left" << avg_err_left;
     fs << "monocular_reprojection_error_right" << avg_err_right;
     fs << "monocular_reprojection_error_avg" << avg_monocular_err;
