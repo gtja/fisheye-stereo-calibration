@@ -27,6 +27,8 @@ This contains a source file to calibrate a stereo system comprising of fisheye l
 2. Hand-eye calibration (`compute_handeye` utility)
 3. Stereo BA with joint optimization (`--joint-ba --init-extrinsic`)
 
+**🆕 Step-by-step scripts:** Instead of using the monolithic `docker-entrypoint.sh`, you can now run each calibration step independently using separate scripts. See [THREE_STEP_CALIBRATION.md](THREE_STEP_CALIBRATION.md) for usage details.
+
 ### 🛠️ Utility Scripts
 
 The `utils/` directory contains Python scripts to help improve calibration quality:
