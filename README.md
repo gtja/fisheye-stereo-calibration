@@ -51,6 +51,31 @@ The `utils/` directory contains Python scripts to help improve calibration quali
 
 These tools help identify problematic images before calibration, potentially reducing errors by 30-50%.
 
+### 📸 Image Rectification
+
+**New!** After calibration, you can rectify/undistort images using the `rectify_images.py` script:
+
+```bash
+# Rectify stereo images (both left and right)
+python3 rectify_images.py -c output/cam_stereo.yml -i imgs/ -o imgs_rectified/ -l left -r right
+
+# Rectify only left camera images (monocular)
+python3 rectify_images.py -c output/cam_stereo.yml -i imgs/ -o imgs_rectified/ -l left --mono
+
+# Specify image extension
+python3 rectify_images.py -c output/cam_stereo.yml -i imgs/ -o imgs_rectified/ -l left -r right -e bmp
+```
+
+**Features:**
+- Supports fisheye, omnidirectional, and double-sphere camera models
+- Stereo and monocular rectification modes
+- Batch processing of multiple images
+- Compatible with calibration results from both `calibrate` and `calibrate_ds`
+
+**Requirements:** OpenCV Python (`opencv-contrib-python`), PyYAML, NumPy
+
+For detailed usage instructions and troubleshooting, see [RECTIFICATION_GUIDE.md](RECTIFICATION_GUIDE.md).
+
 ### Dependencies
 
 - OpenCV (version 4.7.0 with contrib modules)
