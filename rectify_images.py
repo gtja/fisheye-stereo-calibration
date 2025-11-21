@@ -227,7 +227,9 @@ def rectify_omnidir_image(img, K, D, xi, R, P, img_size=None):
         img_size = (img.shape[1], img.shape[0])
     
     # Compute rectification maps
+    # xi must be a 1x1 array for OpenCV's omnidir functions
     xi_mat = np.array([[xi]], dtype=np.float64)
+    # Use RECTIFY_LONGLATI projection for omnidirectional rectification
     map1, map2 = cv2.omnidir.initUndistortRectifyMap(
         K, D, xi_mat, R, P, img_size, cv2.CV_16SC2, cv2.omnidir.RECTIFY_LONGLATI
     )
@@ -260,7 +262,7 @@ def find_images(img_dir, prefix, extension):
         num_str = base[len(prefix):-len(extension)-1]
         try:
             return int(num_str)
-        except:
+        except ValueError:
             return 0
     
     files.sort(key=extract_number)
@@ -333,7 +335,9 @@ def rectify_images(calib_file, input_dir, output_dir, left_prefix, right_prefix=
     
     elif model_type == "double_sphere":
         print("\nUsing double-sphere model (approximated with fisheye)")
-        print("Note: For best results with double-sphere model, use the C++ implementation")
+        print("Note: This uses fisheye approximation (k1-k4 only, xi/alpha not used).")
+        print("      For high-precision undistortion with double-sphere model, a custom")
+        print("      C++ implementation using all 6 distortion coefficients would be needed.")
         
         params_left = get_double_sphere_params(calib_data, 'left')
         if params_left is None:
@@ -368,8 +372,10 @@ def rectify_images(calib_file, input_dir, output_dir, left_prefix, right_prefix=
         else:  # fisheye or double_sphere (approximated)
             rectified = rectify_fisheye_image(img, K_left, D_left, R_left, P_left, img_size)
         
-        # Save rectified image
-        output_filename = f"{left_prefix}_rectified{i+1}.{extension}"
+        # Save rectified image (preserve original basename with _rectified suffix)
+        original_basename = os.path.basename(img_path)
+        name_without_ext = os.path.splitext(original_basename)[0]
+        output_filename = f"{name_without_ext}_rectified.{extension}"
         output_path = os.path.join(output_dir, output_filename)
         cv2.imwrite(output_path, rectified)
         
@@ -393,8 +399,10 @@ def rectify_images(calib_file, input_dir, output_dir, left_prefix, right_prefix=
             else:  # fisheye or double_sphere (approximated)
                 rectified = rectify_fisheye_image(img, K_right, D_right, R_right, P_right, img_size)
             
-            # Save rectified image
-            output_filename = f"{right_prefix}_rectified{i+1}.{extension}"
+            # Save rectified image (preserve original basename with _rectified suffix)
+            original_basename = os.path.basename(img_path)
+            name_without_ext = os.path.splitext(original_basename)[0]
+            output_filename = f"{name_without_ext}_rectified.{extension}"
             output_path = os.path.join(output_dir, output_filename)
             cv2.imwrite(output_path, rectified)
             

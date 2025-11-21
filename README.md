@@ -67,12 +67,14 @@ python3 rectify_images.py -c output/cam_stereo.yml -i imgs/ -o imgs_rectified/ -
 ```
 
 **Features:**
-- Supports both fisheye and omnidirectional camera models
+- Supports fisheye, omnidirectional, and double-sphere camera models
 - Stereo and monocular rectification modes
 - Batch processing of multiple images
 - Compatible with calibration results from both `calibrate` and `calibrate_ds`
 
 **Requirements:** OpenCV Python (`opencv-contrib-python`), PyYAML, NumPy
+
+For detailed usage instructions and troubleshooting, see [RECTIFICATION_GUIDE.md](RECTIFICATION_GUIDE.md).
 
 ### Dependencies
 
