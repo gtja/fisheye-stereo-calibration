@@ -1,483 +1,289 @@
 #!/usr/bin/env python3
 """
-Script to rectify/undistort images using calibration results.
-Supports both fisheye and double-sphere camera models.
+Rectify images using Double-Sphere calibration (full model).
+Supports monocular and stereo rectification.
 
 Usage:
-    # Rectify stereo images
-    python3 rectify_images.py -c cam_stereo.yml -i imgs/ -o output_rectified/ -l left -r right
-    
-    # Rectify single camera images
-    python3 rectify_images.py -c cam_stereo.yml -i imgs/ -o output_rectified/ -l left --mono
-    
-    # Specify image extension
-    python3 rectify_images.py -c cam_stereo.yml -i imgs/ -o output_rectified/ -l left -r right -e jpg
+  python3 rectify_images.py -c cam_stereo.yml -i imgs/ -o output_rectified/ -l left --mono -e bmp
+  python3 rectify_images.py -c cam_stereo.yml -i imgs/ -o output_rectified/ -l left -r right -e bmp
 """
-
 import sys
 import os
 import argparse
 import yaml
 import cv2
 import numpy as np
-from pathlib import Path
 import glob
 
+class DoubleSphereCamera:
+    def __init__(self, params):
+        self.fx = float(params['fx'])
+        self.fy = float(params['fy'])
+        self.cx = float(params['cx'])
+        self.cy = float(params['cy'])
+        self.xi = float(params['xi'])
+        self.alpha = float(params['alpha'])
+        self.k1 = float(params.get('k1', 0))
+        self.k2 = float(params.get('k2', 0))
+        self.k3 = float(params.get('k3', 0))
+        self.k4 = float(params.get('k4', 0))
+        self.k5 = float(params.get('k5', 0))
+        self.k6 = float(params.get('k6', 0))
 
-def load_calibration(yaml_file):
-    """
-    Load calibration parameters from YAML file.
-    
-    Args:
-        yaml_file: Path to calibration YAML file
+    def project(self, points_3d):
+        """
+        Project 3D points (N, 3) or (H, W, 3) to 2D pixel coordinates.
+        """
+        x = points_3d[..., 0]
+        y = points_3d[..., 1]
+        z = points_3d[..., 2]
+
+        d1 = np.sqrt(x**2 + y**2 + z**2)
+        d2 = np.sqrt(x**2 + y**2 + (self.xi * d1 + z)**2)
         
-    Returns:
-        Dictionary containing calibration parameters
-    """
-    if not os.path.exists(yaml_file):
-        print(f"Error: Calibration file not found: {yaml_file}")
-        return None
+        denom = self.alpha * d2 + (1.0 - self.alpha) * (self.xi * d1 + z)
+        
+        # Avoid division by zero
+        mask = np.abs(denom) > 1e-8
+        mx = np.zeros_like(x)
+        my = np.zeros_like(y)
+        
+        mx[mask] = x[mask] / denom[mask]
+        my[mask] = y[mask] / denom[mask]
+        
+        r2 = mx**2 + my**2
+        r4 = r2**2
+        r6 = r4 * r2 # Matches C++ implementation
+        
+        # Distortion model from C++ code:
+        # radial = 1.0 + k1*r2 + k2*r4 + k3*r6 + k4*r2*r4 + k5*r4*r4 + k6*r2*r6
+        # Note: r2*r4 = r6, r4*r4 = r8, r2*r6 = r8
+        radial = 1.0 + self.k1*r2 + self.k2*r4 + self.k3*r6 + \
+                 self.k4*r6 + self.k5*(r4*r4) + self.k6*(r2*r6)
+                 
+        u = self.fx * mx * radial + self.cx
+        v = self.fy * my * radial + self.cy
+        
+        return np.stack([u, v], axis=-1).astype(np.float32)
+
+def load_calib(yaml_file):
+    # Skip OpenCV header and parse YAML
+    with open(yaml_file, 'r') as f:
+        lines = f.readlines()
     
+    # Filter out OpenCV specific tags that PyYAML can't handle
+    filtered_lines = []
+    skip_block = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('%YAML'):
+            continue
+        if '!!opencv-matrix' in stripped:
+            # We will parse R and T manually if needed, or assume they are simple lists if formatted differently
+            # But usually OpenCV YAML puts data in a nested block.
+            # Let's try to parse the structure by removing the tag
+            line = line.replace('!!opencv-matrix', '')
+        filtered_lines.append(line)
+        
     try:
-        with open(yaml_file, 'r') as f:
-            data = yaml.safe_load(f)
+        data = yaml.safe_load(''.join(filtered_lines))
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML: {e}")
+        sys.exit(1)
         
-        model_type = data.get("model_type", "fisheye")
-        print(f"Loaded calibration file: {yaml_file}")
-        print(f"Model type: {model_type}")
+    left = data['left_camera']
+    right = data.get('right_camera', None)
+    
+    # Parse R and T
+    R = None
+    T = None
+    if 'R' in data and data['R'] is not None:
+        R_data = data['R']['data']
+        R = np.array(R_data).reshape(3, 3)
+    if 'T' in data and data['T'] is not None:
+        T_data = data['T']['data']
+        T = np.array(T_data).reshape(3, 1)
         
-        return data
-    except Exception as e:
-        print(f"Error loading calibration file: {e}")
-        return None
+    return left, right, R, T
 
-
-def parse_opencv_matrix(mat_data):
-    """
-    Parse OpenCV matrix from YAML data (supports both dict and list formats).
-    
-    Args:
-        mat_data: Matrix data (can be dict with 'data', 'rows', 'cols' or numpy array)
-        
-    Returns:
-        numpy array
-    """
-    if isinstance(mat_data, dict):
-        # OpenCV YAML format with 'data', 'rows', 'cols'
-        data = np.array(mat_data['data'])
-        rows = mat_data['rows']
-        cols = mat_data['cols']
-        return data.reshape(rows, cols)
-    else:
-        # Already a numpy array or list
-        return np.array(mat_data)
-
-
-def get_fisheye_params(calib_data, camera='left'):
-    """
-    Extract fisheye camera parameters from calibration data.
-    
-    Args:
-        calib_data: Calibration data dictionary
-        camera: 'left' or 'right'
-        
-    Returns:
-        Tuple of (K, D, R, P) matrices
-    """
-    if camera == 'left':
-        K = parse_opencv_matrix(calib_data['K1'])
-        D = parse_opencv_matrix(calib_data['D1']).reshape(-1, 1)
-        R = parse_opencv_matrix(calib_data['R1']) if 'R1' in calib_data else np.eye(3)
-        P = parse_opencv_matrix(calib_data['P1']) if 'P1' in calib_data else K
-    else:
-        K = parse_opencv_matrix(calib_data['K2'])
-        D = parse_opencv_matrix(calib_data['D2']).reshape(-1, 1)
-        R = parse_opencv_matrix(calib_data['R2']) if 'R2' in calib_data else np.eye(3)
-        P = parse_opencv_matrix(calib_data['P2']) if 'P2' in calib_data else K
-    
-    # Ensure correct data types
-    K = K.astype(np.float64)
-    D = D.astype(np.float64)
-    R = R.astype(np.float64)
-    P = P.astype(np.float64)
-    
-    return K, D, R, P
-
-
-def get_omnidir_params(calib_data, camera='left'):
-    """
-    Extract omnidirectional camera parameters from calibration data.
-    
-    Args:
-        calib_data: Calibration data dictionary
-        camera: 'left' or 'right'
-        
-    Returns:
-        Tuple of (K, D, xi, R, P) matrices/values
-    """
-    if camera == 'left':
-        K = parse_opencv_matrix(calib_data['K1'])
-        D = parse_opencv_matrix(calib_data['D1']).reshape(1, -1)
-        xi = calib_data.get('xi1', 0.0)
-        R = parse_opencv_matrix(calib_data['R1']) if 'R1' in calib_data else np.eye(3)
-        P = parse_opencv_matrix(calib_data['P1']) if 'P1' in calib_data else K
-    else:
-        K = parse_opencv_matrix(calib_data['K2'])
-        D = parse_opencv_matrix(calib_data['D2']).reshape(1, -1)
-        xi = calib_data.get('xi2', 0.0)
-        R = parse_opencv_matrix(calib_data['R2']) if 'R2' in calib_data else np.eye(3)
-        P = parse_opencv_matrix(calib_data['P2']) if 'P2' in calib_data else K
-    
-    # Ensure correct data types
-    K = K.astype(np.float64)
-    D = D.astype(np.float64)
-    R = R.astype(np.float64)
-    P = P.astype(np.float64)
-    
-    return K, D, xi, R, P
-
-
-def get_double_sphere_params(calib_data, camera='left'):
-    """
-    Extract double-sphere camera parameters from calibration data.
-    
-    Args:
-        calib_data: Calibration data dictionary
-        camera: 'left' or 'right'
-        
-    Returns:
-        Dictionary containing camera parameters
-    """
-    cam_key = 'left_camera' if camera == 'left' else 'right_camera'
-    
-    if cam_key not in calib_data:
-        print(f"Error: {cam_key} parameters not found in calibration file")
-        return None
-    
-    cam_params = calib_data[cam_key]
-    
-    # For double-sphere model, we approximate using fisheye model
-    # since OpenCV doesn't have built-in double-sphere undistortion
-    K = np.array([
-        [cam_params['fx'], 0, cam_params['cx']],
-        [0, cam_params['fy'], cam_params['cy']],
-        [0, 0, 1]
-    ], dtype=np.float64)
-    
-    # Use the distortion coefficients (k1-k4 for fisheye approximation)
-    D = np.array([
-        cam_params.get('k1', 0.0),
-        cam_params.get('k2', 0.0),
-        cam_params.get('k3', 0.0),
-        cam_params.get('k4', 0.0)
-    ]).reshape(-1, 1)
-    
-    # Note: xi and alpha parameters are not directly used in OpenCV fisheye undistortion
-    # For accurate double-sphere undistortion, a custom implementation would be needed
-    
-    return {'K': K, 'D': D, 'xi': cam_params.get('xi', 0.0), 'alpha': cam_params.get('alpha', 0.5)}
-
-
-def rectify_fisheye_image(img, K, D, R, P, img_size=None):
-    """
-    Rectify a fisheye image.
-    
-    Args:
-        img: Input image
-        K: Camera matrix
-        D: Distortion coefficients
-        R: Rectification rotation matrix
-        P: Projection matrix
-        img_size: Output image size (if None, uses input image size)
-        
-    Returns:
-        Rectified image
-    """
-    if img_size is None:
-        img_size = (img.shape[1], img.shape[0])
-    
-    # Compute rectification maps
-    map1, map2 = cv2.fisheye.initUndistortRectifyMap(
-        K, D, R, P, img_size, cv2.CV_16SC2
-    )
-    
-    # Apply rectification
-    rectified = cv2.remap(img, map1, map2, cv2.INTER_LINEAR)
-    
-    return rectified
-
-
-def rectify_omnidir_image(img, K, D, xi, R, P, img_size=None):
-    """
-    Rectify an omnidirectional image.
-    
-    Args:
-        img: Input image
-        K: Camera matrix
-        D: Distortion coefficients
-        xi: Mirror parameter
-        R: Rectification rotation matrix
-        P: Projection matrix
-        img_size: Output image size (if None, uses input image size)
-        
-    Returns:
-        Rectified image
-    """
-    if img_size is None:
-        img_size = (img.shape[1], img.shape[0])
-    
-    # Compute rectification maps
-    # xi must be a 1x1 array for OpenCV's omnidir functions
-    xi_mat = np.array([[xi]], dtype=np.float64)
-    # Use RECTIFY_LONGLATI projection for omnidirectional rectification
-    map1, map2 = cv2.omnidir.initUndistortRectifyMap(
-        K, D, xi_mat, R, P, img_size, cv2.CV_16SC2, cv2.omnidir.RECTIFY_LONGLATI
-    )
-    
-    # Apply rectification
-    rectified = cv2.remap(img, map1, map2, cv2.INTER_LINEAR)
-    
-    return rectified
-
-
-def find_images(img_dir, prefix, extension):
-    """
-    Find all images with given prefix and extension in directory.
-    
-    Args:
-        img_dir: Directory containing images
-        prefix: Image filename prefix
-        extension: Image file extension (without dot)
-        
-    Returns:
-        List of image paths sorted by numeric index
-    """
-    pattern = os.path.join(img_dir, f"{prefix}*.{extension}")
+def find_images(img_dir, prefix, ext):
+    pattern = os.path.join(img_dir, f"{prefix}*.{ext}")
     files = glob.glob(pattern)
-    
-    # Sort by numeric index if possible
-    def extract_number(filename):
-        base = os.path.basename(filename)
-        # Remove prefix and extension
-        num_str = base[len(prefix):-len(extension)-1]
-        try:
-            return int(num_str)
-        except ValueError:
-            return 0
-    
-    files.sort(key=extract_number)
+    def extract_num(f):
+        base = os.path.basename(f)
+        num = ''.join(filter(str.isdigit, base[len(prefix):]))
+        return int(num) if num else 0
+    files.sort(key=extract_num)
     return files
 
-
-def rectify_images(calib_file, input_dir, output_dir, left_prefix, right_prefix=None, 
-                   extension='jpg', mono=False):
+def init_rectify_map(cam_model, R_rect, P_rect, size):
     """
-    Rectify images using calibration parameters.
+    Generate rectification map for Double Sphere model.
     
     Args:
-        calib_file: Path to calibration YAML file
-        input_dir: Directory containing input images
-        output_dir: Directory to save rectified images
-        left_prefix: Prefix for left camera images
-        right_prefix: Prefix for right camera images (None for mono)
-        extension: Image file extension
-        mono: If True, only rectify left camera images
+        cam_model: DoubleSphereCamera instance
+        R_rect: Rotation matrix (3x3) from Camera to Rectified Frame
+        P_rect: Projection matrix (3x4) of the Rectified Virtual Camera
+        size: (width, height)
     """
-    # Load calibration
-    calib_data = load_calibration(calib_file)
-    if calib_data is None:
-        return False
+    w, h = size
     
-    model_type = calib_data.get("model_type", "fisheye")
+    # 1. Create grid of pixels in Rectified Image
+    u, v = np.meshgrid(np.arange(w), np.arange(h))
     
-    # Create output directory
+    # 2. Unproject from Rectified Pinhole to 3D rays (in Rectified Frame)
+    # P_rect = [K_rect | 0] usually
+    fx_r = P_rect[0, 0]
+    fy_r = P_rect[1, 1]
+    cx_r = P_rect[0, 2]
+    cy_r = P_rect[1, 2]
+    
+    x_rect = (u - cx_r) / fx_r
+    y_rect = (v - cy_r) / fy_r
+    z_rect = np.ones_like(x_rect)
+    
+    # Stack to (H, W, 3)
+    rays_rect = np.stack([x_rect, y_rect, z_rect], axis=-1)
+    
+    # Normalize rays (optional, but good for rotation)
+    norms = np.linalg.norm(rays_rect, axis=-1, keepdims=True)
+    rays_rect = rays_rect / norms
+    
+    # 3. Rotate rays back to Original Camera Frame
+    # ray_cam = R_rect.T * ray_rect
+    # We use tensordot or matmul. 
+    # rays_rect is (H, W, 3). R_rect.T is (3, 3).
+    # result[i,j] = R_rect.T @ rays_rect[i,j]
+    rays_cam = rays_rect @ R_rect # Equivalent to (R_rect.T @ rays_rect.T).T = rays_rect @ R_rect
+    
+    # 4. Project rays using Double Sphere Model
+    uv_dist = cam_model.project(rays_cam)
+    
+    map_x = uv_dist[..., 0]
+    map_y = uv_dist[..., 1]
+    
+    return map_x, map_y
+
+def rectify_images(calib_file, input_dir, output_dir, left_prefix, right_prefix=None, ext='bmp', mono=True):
+    left_params, right_params, R, T = load_calib(calib_file)
+    
+    left_cam = DoubleSphereCamera(left_params)
+    right_cam = None
+    if right_params:
+        right_cam = DoubleSphereCamera(right_params)
+        
     os.makedirs(output_dir, exist_ok=True)
     
-    # Find input images
-    left_images = find_images(input_dir, left_prefix, extension)
-    if not left_images:
-        print(f"Error: No images found with prefix '{left_prefix}' in {input_dir}")
-        return False
-    
-    print(f"\nFound {len(left_images)} left images")
-    
-    right_images = []
-    if not mono and right_prefix:
-        right_images = find_images(input_dir, right_prefix, extension)
-        print(f"Found {len(right_images)} right images")
-        
-        if len(left_images) != len(right_images):
-            print(f"Warning: Number of left and right images don't match")
-    
-    # Load first image to get size
-    first_img = cv2.imread(left_images[0])
-    if first_img is None:
-        print(f"Error: Cannot read image {left_images[0]}")
-        return False
-    
-    img_size = (first_img.shape[1], first_img.shape[0])
-    print(f"Image size: {img_size[0]}x{img_size[1]}")
-    
-    # Prepare rectification parameters based on model type
-    if model_type == "fisheye":
-        print("\nUsing fisheye model for rectification")
-        K_left, D_left, R_left, P_left = get_fisheye_params(calib_data, 'left')
-        
-        if not mono and right_prefix:
-            K_right, D_right, R_right, P_right = get_fisheye_params(calib_data, 'right')
-    
-    elif model_type == "omnidir":
-        print("\nUsing omnidirectional model for rectification")
-        K_left, D_left, xi_left, R_left, P_left = get_omnidir_params(calib_data, 'left')
-        
-        if not mono and right_prefix:
-            K_right, D_right, xi_right, R_right, P_right = get_omnidir_params(calib_data, 'right')
-    
-    elif model_type == "double_sphere":
-        print("\nUsing double-sphere model (approximated with fisheye)")
-        print("Note: This uses fisheye approximation (k1-k4 only, xi/alpha not used).")
-        print("      For high-precision undistortion with double-sphere model, a custom")
-        print("      C++ implementation using all 6 distortion coefficients would be needed.")
-        
-        params_left = get_double_sphere_params(calib_data, 'left')
-        if params_left is None:
-            return False
-        K_left, D_left = params_left['K'], params_left['D']
-        R_left = np.eye(3)  # No rectification rotation for monocular
-        P_left = K_left
-        
-        if not mono and right_prefix:
-            params_right = get_double_sphere_params(calib_data, 'right')
-            if params_right is None:
-                return False
-            K_right, D_right = params_right['K'], params_right['D']
-            R_right = np.eye(3)
-            P_right = K_right
-    
-    else:
-        print(f"Error: Unknown model type: {model_type}")
-        return False
-    
-    # Rectify left images
-    print(f"\nRectifying left images...")
-    for i, img_path in enumerate(left_images):
-        img = cv2.imread(img_path)
-        if img is None:
-            print(f"Warning: Cannot read image {img_path}, skipping")
-            continue
-        
-        # Rectify based on model type
-        if model_type == "omnidir":
-            rectified = rectify_omnidir_image(img, K_left, D_left, xi_left, R_left, P_left, img_size)
-        else:  # fisheye or double_sphere (approximated)
-            rectified = rectify_fisheye_image(img, K_left, D_left, R_left, P_left, img_size)
-        
-        # Save rectified image (preserve original basename with _rectified suffix)
-        original_basename = os.path.basename(img_path)
-        name_without_ext = os.path.splitext(original_basename)[0]
-        output_filename = f"{name_without_ext}_rectified.{extension}"
-        output_path = os.path.join(output_dir, output_filename)
-        cv2.imwrite(output_path, rectified)
-        
-        if (i + 1) % 5 == 0 or i == len(left_images) - 1:
-            print(f"  Processed {i+1}/{len(left_images)} images")
-    
-    print(f"Left images saved to: {output_dir}")
-    
-    # Rectify right images
-    if not mono and right_prefix and right_images:
-        print(f"\nRectifying right images...")
-        for i, img_path in enumerate(right_images):
-            img = cv2.imread(img_path)
-            if img is None:
-                print(f"Warning: Cannot read image {img_path}, skipping")
-                continue
-            
-            # Rectify based on model type
-            if model_type == "omnidir":
-                rectified = rectify_omnidir_image(img, K_right, D_right, xi_right, R_right, P_right, img_size)
-            else:  # fisheye or double_sphere (approximated)
-                rectified = rectify_fisheye_image(img, K_right, D_right, R_right, P_right, img_size)
-            
-            # Save rectified image (preserve original basename with _rectified suffix)
-            original_basename = os.path.basename(img_path)
-            name_without_ext = os.path.splitext(original_basename)[0]
-            output_filename = f"{name_without_ext}_rectified.{extension}"
-            output_path = os.path.join(output_dir, output_filename)
-            cv2.imwrite(output_path, rectified)
-            
-            if (i + 1) % 5 == 0 or i == len(right_images) - 1:
-                print(f"  Processed {i+1}/{len(right_images)} images")
-        
-        print(f"Right images saved to: {output_dir}")
-    
-    print(f"\n✓ Rectification complete!")
-    print(f"  Total images rectified: {len(left_images) + len(right_images)}")
-    print(f"  Output directory: {output_dir}")
-    
-    return True
+    left_imgs = find_images(input_dir, left_prefix, ext)
+    if not left_imgs:
+        print(f"No left images found.")
+        return
 
+    # Read first image to get size
+    img0 = cv2.imread(left_imgs[0])
+    if img0 is None:
+        print(f"Cannot read {left_imgs[0]}")
+        return
+    h, w = img0.shape[:2]
+    img_size = (w, h)
+    
+    # Compute Rectification Transforms
+    if not mono and right_cam and R is not None and T is not None:
+        print("Configuring Stereo Rectification...")
+        # Use cv2.stereoRectify to compute rotations R1, R2
+        # We pass dummy K and D because we only care about R1, R2 derived from R, T
+        K_dummy = np.eye(3)
+        K_dummy[0,0] = w
+        K_dummy[1,1] = h
+        K_dummy[0,2] = w/2
+        K_dummy[1,2] = h/2
+        D_dummy = np.zeros(5)
+        
+        R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(
+            K_dummy, D_dummy, K_dummy, D_dummy, img_size, R, T, 
+            flags=cv2.CALIB_ZERO_DISPARITY, alpha=0
+        )
+        
+        # Custom P_rect to ensure good FOV
+        # P1 and P2 from stereoRectify might be too zoomed in or out
+        # Let's define a custom P_rect with reasonable FOV (e.g. 100 degrees)
+        # f = w / (2 * tan(100/2 * pi/180)) ~= w / 2.38
+        f_new = w / 2.5 
+        P1_new = np.array([
+            [f_new, 0, w/2, 0],
+            [0, f_new, h/2, 0],
+            [0, 0, 1, 0]
+        ])
+        P2_new = P1_new.copy()
+        # P2_new[0, 3] should be P2[0, 3] scaled? 
+        # P2[0, 3] = T_x * f. We can keep P2 from stereoRectify but replace intrinsics part
+        # But for pure image rectification (not disparity), we just need the maps.
+        # If we want valid disparity, P2_new[0,3] must be correct.
+        # P2_new[0, 3] = P1_new[0, 0] * (T[0] if T is horizontal baseline)
+        # Let's just use P1_new for both for image appearance, 
+        # but strictly P2 should have the baseline offset.
+        # Since we are just saving images, P1_new is fine for both if we just want to see rectified images.
+        # But let's try to respect the baseline for P2.
+        baseline = np.linalg.norm(T)
+        P2_new[0, 3] = -f_new * baseline # Standard right camera shift
+        
+        # Generate Maps
+        print("Generating Left Map...")
+        map1_l, map2_l = init_rectify_map(left_cam, R1, P1_new, img_size)
+        print("Generating Right Map...")
+        map1_r, map2_r = init_rectify_map(right_cam, R2, P2_new, img_size)
+        
+    else:
+        print("Configuring Monocular Rectification...")
+        # Identity rotation
+        R1 = np.eye(3)
+        # New camera matrix
+        f_new = w / 3.0 # Wide FOV
+        P1_new = np.array([
+            [f_new, 0, w/2, 0],
+            [0, f_new, h/2, 0],
+            [0, 0, 1, 0]
+        ])
+        print("Generating Left Map...")
+        map1_l, map2_l = init_rectify_map(left_cam, R1, P1_new, img_size)
+        map1_r, map2_r = None, None
+
+    # Process Left Images
+    print(f"Processing {len(left_imgs)} left images...")
+    for i, p in enumerate(left_imgs):
+        img = cv2.imread(p)
+        if img is None: continue
+        rect = cv2.remap(img, map1_l, map2_l, cv2.INTER_LINEAR)
+        out_name = os.path.splitext(os.path.basename(p))[0] + '_rectified.' + ext
+        cv2.imwrite(os.path.join(output_dir, out_name), rect)
+        if (i+1)%10==0: print(f"  {i+1}/{len(left_imgs)}")
+
+    # Process Right Images
+    if not mono and right_prefix and right_cam and map1_r is not None:
+        right_imgs = find_images(input_dir, right_prefix, ext)
+        print(f"Processing {len(right_imgs)} right images...")
+        for i, p in enumerate(right_imgs):
+            img = cv2.imread(p)
+            if img is None: continue
+            rect = cv2.remap(img, map1_r, map2_r, cv2.INTER_LINEAR)
+            out_name = os.path.splitext(os.path.basename(p))[0] + '_rectified.' + ext
+            cv2.imwrite(os.path.join(output_dir, out_name), rect)
+            if (i+1)%10==0: print(f"  {i+1}/{len(right_imgs)}")
+            
+    print("Done.")
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Rectify/undistort images using calibration results',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Rectify stereo images
-  python3 rectify_images.py -c output/cam_stereo.yml -i imgs/ -o imgs_rectified/ -l left -r right
-  
-  # Rectify only left camera images
-  python3 rectify_images.py -c output/cam_stereo.yml -i imgs/ -o imgs_rectified/ -l left --mono
-  
-  # Specify image extension
-  python3 rectify_images.py -c output/cam_stereo.yml -i imgs/ -o imgs_rectified/ -l left -r right -e bmp
-        """
-    )
-    
-    parser.add_argument('-c', '--calib', required=True,
-                        help='Path to calibration YAML file (e.g., cam_stereo.yml)')
-    parser.add_argument('-i', '--input', required=True,
-                        help='Input directory containing images to rectify')
-    parser.add_argument('-o', '--output', required=True,
-                        help='Output directory for rectified images')
-    parser.add_argument('-l', '--left', required=True,
-                        help='Prefix for left camera images (e.g., "left")')
-    parser.add_argument('-r', '--right', default=None,
-                        help='Prefix for right camera images (e.g., "right")')
-    parser.add_argument('-e', '--extension', default='jpg',
-                        help='Image file extension (default: jpg)')
-    parser.add_argument('--mono', action='store_true',
-                        help='Only rectify left camera images (monocular mode)')
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--calib', required=True)
+    parser.add_argument('-i', '--input', required=True)
+    parser.add_argument('-o', '--output', required=True)
+    parser.add_argument('-l', '--left', required=True)
+    parser.add_argument('-r', '--right', default=None)
+    parser.add_argument('-e', '--extension', default='bmp')
+    parser.add_argument('--mono', action='store_true')
     args = parser.parse_args()
-    
-    # Validate inputs
-    if not os.path.exists(args.calib):
-        print(f"Error: Calibration file not found: {args.calib}")
-        sys.exit(1)
-    
-    if not os.path.isdir(args.input):
-        print(f"Error: Input directory not found: {args.input}")
-        sys.exit(1)
-    
-    if not args.mono and not args.right:
-        print("Error: Either specify --right prefix for stereo or use --mono flag")
-        sys.exit(1)
-    
-    # Run rectification
-    success = rectify_images(
-        args.calib,
-        args.input,
-        args.output,
-        args.left,
-        args.right,
-        args.extension,
-        args.mono
-    )
-    
-    sys.exit(0 if success else 1)
+    rectify_images(args.calib, args.input, args.output, args.left, args.right, args.extension, args.mono)
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
+

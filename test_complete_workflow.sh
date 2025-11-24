@@ -25,9 +25,9 @@ docker build --memory 4g --memory-swap 4g -t fisheye-stereo-calibration .
 
 # Test Step 1: Monocular Calibration
 echo "[STEP 1] Running monocular calibration..."
-echo "Command: ./step1_monocular_calibration.sh -w 11 -h 8 -s 0.02 -d /data/imgs -e bmp -o /data/output"
-docker run -v $(pwd)/imgs2:/data/imgs -v $(pwd)/output:/data/output \
-  fisheye-stereo-calibration ./step1_monocular_calibration.sh -w 11 -h 8 -s 0.02 -d /data/imgs -e bmp -o /data/output
+echo "Command: ./step1_monocular_calibration.sh -w 11 -h 8 -s 0.025 -d /data/imgs -e bmp -o /data/output"
+docker run --rm -v $(pwd)/imgs2:/data/imgs -v $(pwd)/output:/data/output \
+  fisheye-stereo-calibration ./step1_monocular_calibration.sh -w 11 -h 8 -s 0.025 -d /data/imgs -e bmp -o /data/output
 
 # Verify Step 1 outputs
 echo ""
@@ -51,9 +51,9 @@ fi
 # Test Step 2: Hand-Eye Calibration
 echo ""
 echo "[STEP 2] Running hand-eye calibration..."
-echo "Command: ./step2_handeye_calibration.sh -w 11 -h 8 -s 0.02 -d /data/imgs -e bmp -o /data/output"
-docker run -v $(pwd)/imgs2:/data/imgs -v $(pwd)/output:/data/output \
-  fisheye-stereo-calibration ./step2_handeye_calibration.sh -w 11 -h 8 -s 0.02 -d /data/imgs -e bmp -o /data/output
+echo "Command: ./step2_handeye_calibration.sh -w 11 -h 8 -s 0.025 -d /data/imgs -e bmp -o /data/output"
+docker run --rm -v $(pwd)/imgs2:/data/imgs -v $(pwd)/output:/data/output \
+  fisheye-stereo-calibration ./step2_handeye_calibration.sh -w 11 -h 8 -s 0.025 -d /data/imgs -e bmp -o /data/output
 
 # Verify Step 2 outputs
 echo ""
@@ -69,9 +69,9 @@ fi
 # Test Step 3: Stereo Bundle Adjustment
 echo ""
 echo "[STEP 3] Running stereo bundle adjustment..."
-echo "Command: ./step3_stereo_bundle_adjustment.sh -w 11 -h 8 -s 0.02 -d /data/imgs -e bmp -o /data/output"
-docker run -v $(pwd)/imgs2:/data/imgs -v $(pwd)/output:/data/output \
-  fisheye-stereo-calibration ./step3_stereo_bundle_adjustment.sh -w 11 -h 8 -s 0.02 -d /data/imgs -e bmp -o /data/output
+echo "Command: ./step3_stereo_bundle_adjustment.sh -w 11 -h 8 -s 0.025 -d /data/imgs -e bmp -o /data/output"
+docker run --rm -v $(pwd)/imgs2:/data/imgs -v $(pwd)/output:/data/output \
+  fisheye-stereo-calibration ./step3_stereo_bundle_adjustment.sh -w 11 -h 8 -s 0.025 -d /data/imgs -e bmp -o /data/output
 
 # Verify Step 3 outputs
 echo ""
