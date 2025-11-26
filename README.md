@@ -245,3 +245,26 @@ The calibration code has been enhanced with several improvements for better accu
 - **🆕 Wide-angle rectification fix**: Automatic partial rectification and adaptive scaling for wide-angle fisheye lenses (FOV > 130°) to ensure rectification error can be evaluated. See [WIDE_ANGLE_RECTIFICATION_FIX.md](WIDE_ANGLE_RECTIFICATION_FIX.md).
 
 See [CALIBRATION_GUIDE.md](CALIBRATION_GUIDE.md) for detailed explanations and additional optimization techniques.
+
+### 🆕 Rectification Maps
+
+After stereo calibration completes, rectification maps are automatically generated and saved to a `rectification_maps/` subfolder next to the calibration output file. These maps can be used to rectify stereo images for disparity computation and 3D reconstruction.
+
+**Generated files:**
+- `map_left_x.yml`, `map_left_y.yml` - Left camera rectification maps
+- `map_right_x.yml`, `map_right_y.yml` - Right camera rectification maps  
+- `rectification_params.yml` - Rectification parameters and stereo transformation
+
+**Usage example (C++):**
+```cpp
+// Load maps
+cv::Mat map_left_x, map_left_y;
+cv::FileStorage("rectification_maps/map_left_x.yml", cv::FileStorage::READ)["map_left_x"] >> map_left_x;
+cv::FileStorage("rectification_maps/map_left_y.yml", cv::FileStorage::READ)["map_left_y"] >> map_left_y;
+
+// Rectify image
+cv::Mat rectified;
+cv::remap(original_img, rectified, map_left_x, map_left_y, cv::INTER_LINEAR);
+```
+
+See [RECTIFICATION_MAPS_README.md](RECTIFICATION_MAPS_README.md) for complete documentation and Python examples.
